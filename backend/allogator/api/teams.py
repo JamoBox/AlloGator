@@ -59,6 +59,7 @@ from ..schemas import (
 from ..services import transfer
 from ..services.ics import build_calendar
 from ..services.notify import Notifier, audit
+from ..services.scheduling import eligible_memberships
 from ..services.slots import RotaGrid, get_zone, utc_to_local
 from ..services.special_days import is_supported, public_holidays
 from .rotas import default_next_start
@@ -184,7 +185,8 @@ def rota_defaults(
     require_member(db, team.id, user)
     return {
         "start_date": default_next_start(team, date.today()),
-        "num_periods": team.default_num_periods,
+        # One period per on-call person, so the rota goes round the team once.
+        "num_periods": len(eligible_memberships(db, team.id)) or team.default_num_periods,
         "period_days": team.default_period_days,
         "handover_time": team.default_handover_time,
     }

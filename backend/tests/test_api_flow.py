@@ -33,6 +33,8 @@ def uid(team, email):
 def test_full_leader_and_member_workflow(api):
     team = make_team(api)
     assert team["is_leader"] and len(team["members"]) == 4
+    # New rotas default to one period per on-call person.
+    assert api.get(f"/api/teams/{team['id']}/rota-defaults").json()["num_periods"] == 4
     start = next_monday(2)
 
     rota = api.post(

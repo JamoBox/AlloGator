@@ -75,6 +75,7 @@ export function AvailabilityPage() {
     start: r.start_date,
     end: r.end_date,
     label: `${r.team_name} (${fmtDateRange(r.start_date, r.end_date)})`,
+    pending: !r.my_submitted,
   }));
   const onCallDates = useMemo(() => {
     const s = new Set<string>();

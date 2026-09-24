@@ -5,6 +5,8 @@ import {
   CopyButton,
   Group,
   Menu,
+  NumberInput,
+  type NumberInputProps,
   Stack,
   Text,
   TextInput,
@@ -18,7 +20,7 @@ import {
   IconCopy,
   IconLink,
 } from '@tabler/icons-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { download } from '../api/client';
 import type { RotaStatus, User } from '../api/types';
 import { initials, personColor } from '../lib/people';
@@ -150,5 +152,38 @@ export function SectionTitle({ children, right }: { children: ReactNode; right?:
       </Text>
       {right}
     </Group>
+  );
+}
+
+/**
+ * A whole-number input that can be cleared while typing (so "8, backspace, 7" gives 7, not
+ * 71). ``onChange`` only fires with valid numbers; leaving it empty restores the last value.
+ */
+export function WholeNumberInput({
+  value,
+  onChange,
+  onBlur,
+  min,
+  ...props
+}: Omit<NumberInputProps, 'value' | 'onChange'> & { value: number; onChange: (value: number) => void }) {
+  const [text, setText] = useState<number | string>(value);
+  useEffect(() => {
+    setText((t) => (t === '' || Number(t) !== value ? value : t));
+  }, [value]);
+  return (
+    <NumberInput
+      {...props}
+      min={min}
+      allowDecimal={false}
+      value={text}
+      onChange={(v) => {
+        setText(v);
+        if (typeof v === 'number' && (min === undefined || v >= min)) onChange(v);
+      }}
+      onBlur={(e) => {
+        if (typeof text !== 'number' || (min !== undefined && text < min)) setText(value);
+        onBlur?.(e);
+      }}
+    />
   );
 }

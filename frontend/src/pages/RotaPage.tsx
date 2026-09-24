@@ -10,7 +10,6 @@ import {
   Loader,
   Menu,
   Modal,
-  NumberInput,
   Select,
   Skeleton,
   Stack,
@@ -55,7 +54,7 @@ import {
   useTeam,
 } from '../api/hooks';
 import type { Analysis, Day, RotaDetail, ScheduleShift, TeamDetail } from '../api/types';
-import { CalendarButton, downloadOrToast, PersonChip, RotaStatusBadge } from '../components/common';
+import { CalendarButton, downloadOrToast, PersonChip, RotaStatusBadge, WholeNumberInput } from '../components/common';
 import { IssuesPanel } from '../components/rota/IssuesPanel';
 import { PeriodsList } from '../components/rota/PeriodsList';
 import { type BoardActions, RotaBoard } from '../components/rota/RotaBoard';
@@ -904,8 +903,8 @@ function EditRotaForm({ rota, hasSchedule, onDone }: { rota: RotaDetail; hasSche
       <TextInput label="Name" value={name} onChange={(e) => setName(e.currentTarget.value)} />
       <DateInput label="First day" value={start} onChange={setStart} valueFormat="ddd D MMM YYYY" />
       <Group grow>
-        <NumberInput label="Periods" min={1} max={104} value={periods} onChange={(v) => setPeriods(Number(v) || 1)} />
-        <NumberInput label="Days per period" min={1} max={90} value={periodDays} onChange={(v) => setPeriodDays(Number(v) || 1)} />
+        <WholeNumberInput label="Periods" min={1} max={104} value={periods} onChange={setPeriods} />
+        <WholeNumberInput label="Days per period" min={1} max={90} value={periodDays} onChange={setPeriodDays} />
       </Group>
       <TextInput label="Handover time" type="time" value={handover} onChange={(e) => setHandover(e.currentTarget.value)} />
       <DateInput label="Availability deadline" value={deadline} onChange={setDeadline} valueFormat="ddd D MMM YYYY" clearable />

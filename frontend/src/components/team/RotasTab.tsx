@@ -5,7 +5,6 @@ import {
   Group,
   Loader,
   Modal,
-  NumberInput,
   Progress,
   Stack,
   Table,
@@ -21,7 +20,7 @@ import { api } from '../../api/client';
 import { keys, useAction, usePrefetch, useRotaDefaults, useRotas } from '../../api/hooks';
 import type { RotaDetail, TeamDetail } from '../../api/types';
 import { dayjs, fmtDateRange, ISO } from '../../lib/dates';
-import { RotaStatusBadge } from '../common';
+import { RotaStatusBadge, WholeNumberInput } from '../common';
 
 export function RotasTab({ team }: { team: TeamDetail }) {
   const rotas = useRotas(team.id);
@@ -149,7 +148,9 @@ function NewRotaForm({ team, onDone }: { team: TeamDetail; onDone: () => void })
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [start, setStart] = useState<string | null>(null);
-  const [periods, setPeriods] = useState<number>(team.default_num_periods);
+  // One period each for everyone on call, so the rota goes round the team once.
+  const onCallCount = team.members.filter((m) => m.on_call).length;
+  const [periods, setPeriods] = useState<number>(onCallCount || team.default_num_periods);
   const [periodDays, setPeriodDays] = useState<number>(team.default_period_days);
   const [handover, setHandover] = useState(team.default_handover_time);
 
@@ -191,20 +192,21 @@ function NewRotaForm({ team, onDone }: { team: TeamDetail; onDone: () => void })
         required
       />
       <Group grow>
-        <NumberInput
+        <WholeNumberInput
           label="Number of periods"
+          description={onCallCount ? `One each for ${onCallCount} people on call` : undefined}
           min={1}
           max={104}
           value={periods}
-          onChange={(v) => setPeriods(Number(v) || 1)}
+          onChange={setPeriods}
         />
-        <NumberInput
+        <WholeNumberInput
           label="Period length (days)"
           description="How long each on-call stint is"
           min={1}
           max={90}
           value={periodDays}
-          onChange={(v) => setPeriodDays(Number(v) || 1)}
+          onChange={setPeriodDays}
         />
       </Group>
       <TextInput
