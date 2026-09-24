@@ -1,0 +1,73 @@
+# Production-style deployment: Postgres + AlloGator behind oauth2-proxy (OIDC sign-in).
+#
+#   cp .env.example .env   # fill in the OAUTH2_PROXY_* values for your identity provider
+#   docker compose up -d
+#
+# AlloGator itself is not published on a host port: every request must pass through
+# oauth2-proxy, which authenticates the user and forwards their email in X-Forwarded-Email.
+# To just try AlloGator locally without an identity provider, see "Quick start" in README.md.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: allogator
+      POSTGRES_USER: allogator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-allogator}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U allogator"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    image: allogator:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ALLOGATOR_DATABASE_URL: postgresql+psycopg://allogator:${POSTGRES_PASSWORD:-allogator}@db/allogator
+      ALLOGATOR_AUTH_MODE: header
+      ALLOGATOR_AUTH_EMAIL_HEADER: X-Forwarded-Email
+      ALLOGATOR_AUTH_NAME_HEADER: X-Forwarded-Preferred-Username
+      ALLOGATOR_BASE_URL: ${ALLOGATOR_BASE_URL:-http://localhost:4180}
+      ALLOGATOR_LOGOUT_URL: /oauth2/sign_out
+      ALLOGATOR_ADMIN_EMAILS: ${ALLOGATOR_ADMIN_EMAILS:-}
+      ALLOGATOR_SMTP_HOST: ${ALLOGATOR_SMTP_HOST:-}
+      ALLOGATOR_SMTP_PORT: ${ALLOGATOR_SMTP_PORT:-587}
+      ALLOGATOR_SMTP_USERNAME: ${ALLOGATOR_SMTP_USERNAME:-}
+      ALLOGATOR_SMTP_PASSWORD: ${ALLOGATOR_SMTP_PASSWORD:-}
+      ALLOGATOR_SMTP_FROM: ${ALLOGATOR_SMTP_FROM:-AlloGator <allogator@localhost>}
+    expose:
+      - "8000"
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.8.1
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "4180:4180"
+    environment:
+      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+      OAUTH2_PROXY_UPSTREAMS: http://app:8000/
+      OAUTH2_PROXY_PROVIDER: ${OAUTH2_PROXY_PROVIDER:-oidc}
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${OAUTH2_PROXY_OIDC_ISSUER_URL:-}
+      OAUTH2_PROXY_CLIENT_ID: ${OAUTH2_PROXY_CLIENT_ID:-}
+      OAUTH2_PROXY_CLIENT_SECRET: ${OAUTH2_PROXY_CLIENT_SECRET:-}
+      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET:-}
+      OAUTH2_PROXY_REDIRECT_URL: ${ALLOGATOR_BASE_URL:-http://localhost:4180}/oauth2/callback
+      OAUTH2_PROXY_EMAIL_DOMAINS: ${OAUTH2_PROXY_EMAIL_DOMAINS:-*}
+      OAUTH2_PROXY_COOKIE_SECURE: ${OAUTH2_PROXY_COOKIE_SECURE:-false}
+      OAUTH2_PROXY_PASS_USER_HEADERS: "true"
+      OAUTH2_PROXY_REVERSE_PROXY: "true"
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+      # Calendar apps can't sign in: the per-user feed URL carries its own secret token.
+      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/ical/,GET=^/api/health$$"
+
+volumes:
+  db-data:

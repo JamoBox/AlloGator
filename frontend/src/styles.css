@@ -1,0 +1,312 @@
+/* Shared styles for grids that don't map neatly onto Mantine components. */
+
+:root {
+  --ag-cell: 26px;
+  --ag-unavailable: var(--mantine-color-red-2);
+  --ag-unavailable-strong: var(--mantine-color-red-6);
+  --ag-partial: var(--mantine-color-orange-1);
+  --ag-partial-strong: var(--mantine-color-orange-6);
+  --ag-grid-line: var(--mantine-color-gray-3);
+  --ag-weekend: var(--mantine-color-gray-0);
+  --ag-selected: var(--mantine-color-blue-6);
+  --ag-holiday: var(--mantine-color-grape-0);
+  --ag-holiday-strong: var(--mantine-color-grape-5);
+}
+
+/* light-dark() can't be used for custom properties on :root (the colour-scheme attribute
+   lives on the same element), so dark values are set explicitly. */
+:root[data-mantine-color-scheme='dark'] {
+  --ag-unavailable: rgba(250, 82, 82, 0.35);
+  --ag-unavailable-strong: var(--mantine-color-red-5);
+  --ag-partial: rgba(255, 146, 43, 0.25);
+  --ag-partial-strong: var(--mantine-color-orange-4);
+  --ag-grid-line: var(--mantine-color-dark-4);
+  --ag-weekend: var(--mantine-color-dark-6);
+  --ag-selected: var(--mantine-color-blue-4);
+  --ag-holiday: rgba(190, 75, 219, 0.18);
+  --ag-holiday-strong: var(--mantine-color-grape-4);
+}
+
+/* ---- Availability month calendar ---- */
+.ag-month {
+  user-select: none;
+  -webkit-user-select: none;
+  /* Vertical swipes scroll the page; taps and horizontal drags select days. */
+  touch-action: pan-y;
+}
+.ag-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.ag-weekday {
+  text-align: center;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+  font-weight: 600;
+  padding-bottom: 2px;
+}
+.ag-day {
+  position: relative;
+  aspect-ratio: 1 / 0.9;
+  min-height: 38px;
+  border-radius: var(--mantine-radius-sm);
+  border: 1px solid var(--ag-grid-line);
+  background: var(--mantine-color-body);
+  cursor: pointer;
+  padding: 3px 5px;
+  font-size: var(--mantine-font-size-sm);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 60ms ease, box-shadow 60ms ease;
+  overflow: hidden;
+}
+.ag-day:hover {
+  box-shadow: 0 0 0 1px var(--mantine-color-gray-5);
+}
+.ag-day[data-outside] {
+  visibility: hidden;
+  pointer-events: none;
+}
+.ag-day[data-past] {
+  opacity: 0.45;
+}
+.ag-day[data-weekend] {
+  background: var(--ag-weekend);
+}
+.ag-day[data-in-rota] {
+  border-color: var(--mantine-color-gator-5);
+  border-width: 2px;
+}
+.ag-day[data-special]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 3px;
+  background: var(--ag-holiday-strong);
+}
+.ag-day[data-kind='unavailable'] {
+  background: var(--ag-unavailable);
+  border-color: var(--ag-unavailable-strong);
+}
+.ag-day[data-kind='partial'] {
+  background: var(--ag-partial);
+  border-color: var(--ag-partial-strong);
+  border-style: dashed;
+}
+.ag-day[data-selected] {
+  box-shadow: 0 0 0 2px var(--ag-selected);
+  transform: scale(0.96);
+}
+.ag-day[data-today] .ag-day-num {
+  background: var(--mantine-primary-color-filled);
+  color: white;
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.ag-day-num {
+  font-weight: 600;
+  align-self: flex-start;
+  line-height: 1.5;
+}
+.ag-day-flags {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 12px;
+}
+
+/* ---- Rota board (people x days) ---- */
+.ag-board {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--mantine-font-size-xs);
+}
+.ag-board th,
+.ag-board td {
+  border-right: 1px solid var(--ag-grid-line);
+  border-bottom: 1px solid var(--ag-grid-line);
+  padding: 0;
+  text-align: center;
+}
+.ag-board thead th {
+  position: sticky;
+  top: 0;
+  background: var(--mantine-color-body);
+  z-index: 2;
+  font-weight: 500;
+}
+.ag-board .ag-name {
+  position: sticky;
+  left: 0;
+  background: var(--mantine-color-body);
+  z-index: 1;
+  text-align: left;
+  padding: 2px 8px;
+  white-space: nowrap;
+  min-width: 150px;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ag-board thead .ag-name {
+  z-index: 3;
+}
+.ag-board .ag-period-start {
+  border-left: 2px solid var(--mantine-color-dimmed);
+}
+.ag-cell {
+  width: var(--ag-cell);
+  min-width: var(--ag-cell);
+  height: var(--ag-cell);
+  position: relative;
+}
+.ag-cell[data-weekend] {
+  background: var(--ag-weekend);
+}
+.ag-cell[data-kind='unavailable'] {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--ag-unavailable),
+    var(--ag-unavailable) 4px,
+    transparent 4px,
+    transparent 7px
+  );
+}
+.ag-cell[data-kind='partial'] {
+  background: var(--ag-partial);
+}
+.ag-cell[data-clickable] {
+  cursor: pointer;
+}
+.ag-cell[data-clickable]:hover {
+  outline: 2px solid var(--ag-selected);
+  outline-offset: -2px;
+}
+.ag-cell-fill {
+  position: absolute;
+  inset: 3px 1px;
+  border-radius: 4px;
+}
+.ag-cell-fill[data-conflict] {
+  box-shadow: 0 0 0 2px var(--ag-unavailable-strong);
+}
+.ag-cell-fill[data-limited] {
+  box-shadow: 0 0 0 2px var(--ag-partial-strong);
+}
+.ag-oncall-row td {
+  height: 30px;
+}
+.ag-uncovered {
+  background: var(--ag-unavailable-strong) !important;
+  color: white;
+  font-weight: 700;
+}
+.ag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.ag-legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  display: inline-block;
+  border: 1px solid var(--ag-grid-line);
+}
+
+/* ---- The croc ---- */
+.croc .croc-upper,
+.croc .croc-lower {
+  transform-box: view-box;
+  transform-origin: 14px 41px;
+  transition: transform 110ms cubic-bezier(0.3, 1.6, 0.6, 1);
+}
+.croc[data-chomping] .croc-upper {
+  animation: croc-chomp-upper 0.46s ease-in-out infinite;
+}
+.croc[data-chomping] .croc-lower {
+  animation: croc-chomp-lower 0.46s ease-in-out infinite;
+}
+.croc[data-sleepy] .croc-upper,
+.ag-logo:hover .croc-upper {
+  transform: rotate(9deg);
+}
+.croc[data-sleepy] .croc-lower,
+.ag-logo:hover .croc-lower {
+  transform: rotate(-4deg);
+}
+@keyframes croc-chomp-upper {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(9deg); }
+}
+@keyframes croc-chomp-lower {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-4deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .croc[data-chomping] .croc-upper,
+  .croc[data-chomping] .croc-lower {
+    animation: none;
+  }
+}
+
+/* ---- Board extras ---- */
+.ag-tip {
+  position: fixed;
+  z-index: 400;
+  transform: translate(-50%, calc(-100% - 8px));
+  pointer-events: none;
+  white-space: pre-line;
+  background: var(--mantine-color-dark-6);
+  color: var(--mantine-color-white);
+  font-size: var(--mantine-font-size-xs);
+  line-height: 1.35;
+  padding: 5px 9px;
+  border-radius: var(--mantine-radius-sm);
+  box-shadow: var(--mantine-shadow-md);
+  max-width: 280px;
+}
+.ag-board thead th[data-weekend] {
+  background: var(--ag-weekend);
+}
+.ag-board thead th[data-holiday] {
+  background: var(--ag-holiday);
+  box-shadow: inset 0 3px 0 var(--ag-holiday-strong);
+  cursor: help;
+}
+.ag-holiday-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+  background: var(--ag-holiday);
+  box-shadow: inset 0 3px 0 var(--ag-holiday-strong);
+}
+.ag-pin {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: white;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.ag-note-dot {
+  background: var(--mantine-color-dimmed);
+  position: absolute;
+  top: 3px;
+  right: 3px;
+}
+.ag-check {
+  color: var(--mantine-color-gator-6);
+  font-size: 11px;
+  font-weight: 700;
+}
