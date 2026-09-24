@@ -9,19 +9,22 @@ const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 /**
  * Month calendar for picking some of a set of days: tap to toggle a day, drag across a run of
  * days, or shift-click to add everything since the last day picked. Only ``pickable`` days
- * (date -> tooltip) can be chosen; ``marked`` days (date -> tooltip) get a dashed outline.
+ * (date -> tooltip) can be chosen; ``marked`` days (date -> tooltip) get a dashed outline, and
+ * ``warn`` days are shaded amber (e.g. days the other person can't do).
  */
 export function DayPickCalendar({
   pickable,
   selected,
   onChange,
   marked,
+  warn,
   months = 2,
 }: {
   pickable: Map<string, string>;
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
   marked?: Map<string, string>;
+  warn?: Map<string, { kind: 'unavailable' | 'partial'; tip: string }>;
   months?: number;
 }) {
   const first = [...pickable.keys()].sort()[0];
@@ -126,7 +129,8 @@ export function DayPickCalendar({
                   if (!date) return <div key={`x${i}`} className="ag-day" data-outside />;
                   const d = dayjs(date);
                   const can = pickable.has(date);
-                  const tip = [pickable.get(date), marked?.get(date)].filter(Boolean).join(' · ');
+                  const w = warn?.get(date);
+                  const tip = [pickable.get(date), marked?.get(date), w?.tip].filter(Boolean).join(' · ');
                   return (
                     <div
                       key={date}
@@ -136,6 +140,7 @@ export function DayPickCalendar({
                       data-disabled={!can || undefined}
                       data-selected={selected.has(date) || undefined}
                       data-marked={marked?.has(date) || undefined}
+                      data-warn={w?.kind}
                       data-today={date === today || undefined}
                       data-weekend={d.day() === 0 || d.day() === 6 || undefined}
                       onPointerDown={(e) => begin(date, e)}

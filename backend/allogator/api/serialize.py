@@ -21,8 +21,10 @@ from ..models import (
     SwapSlot,
     Team,
     User,
+    utcnow,
 )
 from ..schemas import (
+    AvailabilityEntry,
     DayOut,
     MemberOut,
     PeriodOut,
@@ -41,6 +43,9 @@ from ..services import segments as seg
 from ..services.scheduling import load_unavailability, rota_segments
 from ..services.slots import RotaGrid, get_zone, utc_to_local
 from ..services.special_days import team_special_days
+
+# How far ahead to show a swap requester's unavailability to people offering.
+REQUESTER_UNAVAILABLE_AHEAD = timedelta(days=400)
 
 
 def user_out(u: User | None) -> UserOut | None:
@@ -319,6 +324,16 @@ def swap_out(db: Session, swap: SwapRequest, user: User) -> SwapRequestOut:
             "The schedule has changed since this request was made; "
             f"{swap.requester.name} no longer holds all of this time."
         )
+    unavailable = []
+    if swap.status == SWAP_OPEN:
+        today = utc_to_local(utcnow(), tz).date()
+        entries = load_unavailability(
+            db, [swap.requester_id], today, today + REQUESTER_UNAVAILABLE_AHEAD
+        ).get(swap.requester_id, {})
+        unavailable = [
+            AvailabilityEntry(user_id=swap.requester_id, date=d, kind=e.kind, note=e.note)
+            for d, e in sorted(entries.items())
+        ]
     return SwapRequestOut(
         id=swap.id,
         team_id=swap.team_id,
@@ -337,4 +352,5 @@ def swap_out(db: Session, swap: SwapRequest, user: User) -> SwapRequestOut:
         offers=[offer_out(db, swap, o) for o in swap.offers if o.status != OFFER_WITHDRAWN],
         can_offer=can_offer,
         warnings=warnings,
+        requester_unavailable=unavailable,
     )

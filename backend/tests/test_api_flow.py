@@ -346,6 +346,14 @@ def test_swap_separate_days_and_withdraw(api):
     # Every slot must be yours.
     offerer.post("/api/swaps", json={"slots": [slot(days1[0]), slot(days0[0])]}, expect=409)
 
+    # People offering can see the days the requester said they can't do.
+    requester.post(
+        "/api/me/unavailability",
+        json={"dates": [days1[3]["date"]], "kind": "unavailable", "note": "Dentist"},
+    )
+    shown = offerer.get(f"/api/swaps/{swap['id']}").json()["requester_unavailable"]
+    assert [(e["date"], e["note"]) for e in shown] == [(days1[3]["date"], "Dentist")]
+
     # An offer made and then withdrawn disappears, and the requester is told.
     swap = offerer.post(
         f"/api/swaps/{swap['id']}/offers",

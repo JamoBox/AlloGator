@@ -87,6 +87,7 @@ export function SlotPicker({
   initialShiftId,
   initialDate,
   marked,
+  warn,
 }: {
   shifts: ScheduleShift[];
   tz: string;
@@ -94,6 +95,7 @@ export function SlotPicker({
   initialShiftId?: number;
   initialDate?: string;
   marked?: Map<string, string>;
+  warn?: Map<string, { kind: 'unavailable' | 'partial'; tip: string }>;
 }) {
   const days = useMemo(() => shiftDays(shifts, tz), [shifts, tz]);
   const pickable = useMemo(
@@ -136,7 +138,7 @@ export function SlotPicker({
   const runs = groupRuns([...selected].map((date) => ({ date })));
   return (
     <Stack gap="sm">
-      <DayPickCalendar pickable={pickable} selected={selected} onChange={setSelected} marked={marked} />
+      <DayPickCalendar pickable={pickable} selected={selected} onChange={setSelected} marked={marked} warn={warn} />
       <Group justify="space-between" gap="xs">
         <Text size="sm" fw={600}>
           {selected.size === 0
@@ -456,6 +458,21 @@ function OfferForm({
         m.set(d, `${swap.requester.name} needs cover`);
     return m;
   }, [swap, team.timezone]);
+  // Days they've said they can't do, so you don't offer those in exchange.
+  const first = swap.requester.name.split(' ')[0];
+  const cant = useMemo(
+    () =>
+      new Map(
+        swap.requester_unavailable.map((e) => [
+          e.date,
+          {
+            kind: e.kind,
+            tip: `${first} ${e.kind === 'unavailable' ? "can't do this day" : 'is only partly available'}${e.note ? `: ${e.note}` : ''}`,
+          },
+        ]),
+      ),
+    [swap, first],
+  );
   const offer = useAction(
     () =>
       api<SwapRequest>(`/api/swaps/${swap.id}/offers`, {
@@ -479,7 +496,17 @@ function OfferForm({
         </Stack>
       </Radio.Group>
       {mode === 'swap' && (
-        <SlotPicker shifts={myShifts} tz={team.timezone} onChange={setSlots} marked={requested} />
+        <>
+          <SlotPicker shifts={myShifts} tz={team.timezone} onChange={setSlots} marked={requested} warn={cant} />
+          {cant.size > 0 && (
+            <Group gap={6}>
+              <span className="ag-legend-swatch" style={{ background: 'var(--mantine-color-orange-light)', borderColor: 'var(--mantine-color-orange-6)' }} />
+              <Text size="xs" c="dimmed">
+                Amber: days {first} said they can't do (hover for details)
+              </Text>
+            </Group>
+          )}
+        </>
       )}
       <Textarea label="Note" value={note} onChange={(e) => setNote(e.currentTarget.value)} />
       <Group justify="flex-end">
