@@ -1,7 +1,7 @@
 /* Shared styles for grids that don't map neatly onto Mantine components. */
 
 :root {
-  --ag-cell: 26px;
+  --ag-name-w: 168px;
   --ag-unavailable: var(--mantine-color-red-2);
   --ag-unavailable-strong: var(--mantine-color-red-6);
   --ag-partial: var(--mantine-color-orange-1);
@@ -172,10 +172,95 @@
 }
 
 /* ---- Rota board (people x days) ---- */
+/* Three densities. RotaBoard sets --ag-row to fill the screen height between --ag-row-min and
+   --ag-row-max; day columns stretch to fill the width but never go below --ag-cell-min (the
+   board scrolls sideways instead). Text and avatars scale with the row height. */
+.ag-board-wrap {
+  --ag-row: var(--ag-row-min);
+  --ag-row-min: 36px;
+  --ag-row-max: 56px;
+  --ag-oncall-max: 40px;
+  --ag-cell-min: 48px;
+  --ag-head-row: 26px;
+  --ag-head-fs: 13px;
+  --ag-dow-fs: 10px;
+  --ag-fs: clamp(12px, calc(var(--ag-row) * 0.3), 14px);
+  --ag-fs-sm: clamp(10px, calc(var(--ag-row) * 0.24), 12px);
+  --ag-avatar: clamp(22px, calc(var(--ag-row) * 0.55), 30px);
+}
+.ag-board-wrap[data-density='compact'] {
+  --ag-row-min: 26px;
+  --ag-row-max: 26px;
+  --ag-oncall-max: 26px;
+  --ag-cell-min: 20px;
+  --ag-head-row: 24px;
+  --ag-head-fs: 12px;
+  --ag-dow-fs: 9px;
+  --ag-fs: 12px;
+  --ag-fs-sm: 9px;
+  --ag-avatar: 20px;
+}
+.ag-board-wrap[data-density='expanded'] {
+  --ag-row-min: 52px;
+  --ag-row-max: 72px;
+  --ag-oncall-max: 48px;
+  --ag-cell-min: 64px;
+  --ag-head-row: 30px;
+  --ag-head-fs: 15px;
+  --ag-dow-fs: 11px;
+  --ag-fs: clamp(14px, calc(var(--ag-row) * 0.24), 16px);
+  --ag-fs-sm: 13px;
+  --ag-avatar: clamp(28px, calc(var(--ag-row) * 0.5), 36px);
+}
+@media (min-width: 48em) {
+  .ag-board-wrap[data-density='expanded'] {
+    --ag-name-w: 220px;
+  }
+}
+.ag-dow {
+  font-size: var(--ag-dow-fs);
+  color: var(--mantine-color-dimmed);
+}
+.ag-dow-short,
+[data-density='compact'] .ag-dow-long {
+  display: none;
+}
+[data-density='compact'] .ag-dow-short {
+  display: inline;
+}
+/* Expanded has room for first names in the "On call" row. */
+.ag-who-long,
+[data-density='expanded'] .ag-who-short {
+  display: none;
+}
+[data-density='expanded'] .ag-who-long {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 2px;
+}
+.ag-board thead th[data-today] .ag-dom {
+  display: inline-block;
+  min-width: 1.6em;
+  border-radius: 999px;
+  background: var(--mantine-primary-color-filled);
+  color: white;
+}
 .ag-board {
   border-collapse: separate;
   border-spacing: 0;
   font-size: var(--mantine-font-size-xs);
+  width: 100%;
+  table-layout: fixed;
+}
+.ag-board .ag-name-col {
+  width: var(--ag-name-w);
+}
+@media (max-width: 48em) {
+  :root {
+    --ag-name-w: 124px;
+  }
 }
 .ag-board th,
 .ag-board td {
@@ -190,6 +275,7 @@
   background: var(--mantine-color-body);
   z-index: 2;
   font-weight: 500;
+  font-size: var(--ag-head-fs);
 }
 .ag-board .ag-name {
   position: sticky;
@@ -199,21 +285,25 @@
   text-align: left;
   padding: 2px 8px;
   white-space: nowrap;
-  min-width: 150px;
-  max-width: 190px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .ag-board thead .ag-name {
   z-index: 3;
 }
+/* Both header rows stick: the day row sits just under the period row. */
+.ag-board thead tr:first-child th {
+  height: var(--ag-head-row);
+  box-sizing: border-box;
+}
+.ag-board thead tr + tr th {
+  top: var(--ag-head-row);
+}
 .ag-board .ag-period-start {
   border-left: 2px solid var(--mantine-color-dimmed);
 }
 .ag-cell {
-  width: var(--ag-cell);
-  min-width: var(--ag-cell);
-  height: var(--ag-cell);
+  height: var(--ag-row);
   position: relative;
 }
 .ag-cell[data-weekend] {
@@ -240,7 +330,7 @@
 }
 .ag-cell-fill {
   position: absolute;
-  inset: 3px 1px;
+  inset: calc(var(--ag-row) * 0.14) 1px;
   border-radius: 4px;
 }
 .ag-cell-fill[data-conflict] {
@@ -250,7 +340,7 @@
   box-shadow: 0 0 0 2px var(--ag-partial-strong);
 }
 .ag-oncall-row td {
-  height: 30px;
+  height: calc(min(var(--ag-row), var(--ag-oncall-max)) + 4px);
 }
 .ag-uncovered {
   background: var(--ag-unavailable-strong) !important;
@@ -359,6 +449,6 @@
 }
 .ag-check {
   color: var(--mantine-color-gator-6);
-  font-size: 11px;
+  font-size: var(--ag-fs, 11px);
   font-weight: 700;
 }

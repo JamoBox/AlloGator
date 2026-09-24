@@ -1,4 +1,5 @@
-import { Avatar, Group, Menu, ScrollArea, Switch, Text } from '@mantine/core';
+import { Avatar, Group, Menu, ScrollArea, SegmentedControl, Switch, Text } from '@mantine/core';
+import { useLocalStorage } from '@mantine/hooks';
 import {
   IconBulb,
   IconCalendarEvent,
@@ -8,9 +9,9 @@ import {
   IconUserOff,
   IconUsers,
 } from '@tabler/icons-react';
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AvailabilityMatrix, Day, RotaDetail, User } from '../../api/types';
-import { dayjs, inTz } from '../../lib/dates';
+import { dayjs, inTz, ISO } from '../../lib/dates';
 import { initials, personColor } from '../../lib/people';
 import { HoverTip, type HoverTipHandle } from '../HoverTip';
 
@@ -73,11 +74,42 @@ export function RotaBoard({ rota, matrix, editable, actions, highlightUserId }: 
   }, []);
   const onLeave = useCallback(() => tip.current?.hide(), []);
 
+  const [density, setDensity] = useLocalStorage<Density>({ key: 'allogator.boardDensity', defaultValue: 'normal' });
+  const wrap = useRef<HTMLDivElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
+  useFitRows(wrap);
+  useScrollToNow(rota, viewport, density);
+  useWheelScrollsSideways(viewport);
+
   return (
-    <div>
-      <ScrollArea
+    <div ref={wrap} className="ag-board-wrap" data-density={density}>
+      <Group justify="flex-end" gap="md" mb="xs">
+        {hiddenCount > 0 || showAll ? (
+          <Switch
+            size="xs"
+            label={`Show people not on call${hiddenCount ? ` (${hiddenCount})` : ''}`}
+            checked={showAll}
+            onChange={(e) => setShowAll(e.currentTarget.checked)}
+          />
+        ) : null}
+        <SegmentedControl
+          size="xs"
+          aria-label="Board size"
+          value={density}
+          onChange={(v) => setDensity(v as Density)}
+          data={[
+            { value: 'compact', label: 'Compact' },
+            { value: 'normal', label: 'Normal' },
+            { value: 'expanded', label: 'Expanded' },
+          ]}
+        />
+      </Group>
+      {/* Capped to the viewport so the date header and name column stay in view on big teams. */}
+      <ScrollArea.Autosize
+        viewportRef={viewport}
+        mah="calc(100dvh - var(--app-shell-header-height, 0px) - 7rem)"
         type="auto"
-        offsetScrollbars
+        offsetScrollbars="present"
         onScrollPositionChange={() => {
           tip.current?.hide();
           setMenu(null);
@@ -93,7 +125,7 @@ export function RotaBoard({ rota, matrix, editable, actions, highlightUserId }: 
           onOver={onOver}
           onLeave={onLeave}
         />
-      </ScrollArea>
+      </ScrollArea.Autosize>
       <HoverTip ref={tip} />
       {editable && actions && menu && (
         <CellMenu
@@ -105,19 +137,91 @@ export function RotaBoard({ rota, matrix, editable, actions, highlightUserId }: 
           onClose={() => setMenu(null)}
         />
       )}
-      <Group justify="space-between" mt="xs">
+      <Group mt="xs">
         <BoardLegend />
-        {hiddenCount > 0 || showAll ? (
-          <Switch
-            size="xs"
-            label={`Show people not on call${hiddenCount ? ` (${hiddenCount})` : ''}`}
-            checked={showAll}
-            onChange={(e) => setShowAll(e.currentTarget.checked)}
-          />
-        ) : null}
       </Group>
     </div>
   );
+}
+
+type Density = 'compact' | 'normal' | 'expanded';
+
+const BELOW_BOARD = 104; // legend, card padding and the hint underneath
+
+/**
+ * Grow the rows to fill the screen height (small teams otherwise leave most of it blank), within
+ * the current density's --ag-row-min/--ag-row-max. Sets a CSS variable on the wrapper instead of
+ * re-rendering, so the memoised table is untouched.
+ */
+function useFitRows(wrap: React.RefObject<HTMLDivElement | null>) {
+  const fit = useCallback(() => {
+    const el = wrap.current;
+    const table = el?.querySelector('table');
+    const body = table?.tBodies[0];
+    if (!el || !table || !body?.rows.length) return;
+    const css = getComputedStyle(el);
+    const px = (name: string) => parseFloat(css.getPropertyValue(name));
+    const [min, max, oncallMax] = [px('--ag-row-min'), px('--ag-row-max'), px('--ag-oncall-max')];
+    const top = table.getBoundingClientRect().top + window.scrollY;
+    const room = window.innerHeight - top - (table.tHead?.offsetHeight ?? 0) - BELOW_BOARD;
+    // The "On call" summary row stops growing at --ag-oncall-max (+4px, see .ag-oncall-row).
+    const oncall = body.querySelector('.ag-oncall-row') ? 1 : 0;
+    const people = body.rows.length - oncall;
+    let fit = people ? Math.floor((room - oncall * (oncallMax + 4)) / people) : oncallMax;
+    if (fit < oncallMax) fit = Math.floor((room - oncall * 4) / body.rows.length);
+    const row = `${Math.max(min, Math.min(max, fit))}px`;
+    if (el.style.getPropertyValue('--ag-row') !== row) el.style.setProperty('--ag-row', row);
+  }, [wrap]);
+
+  // Every render: rows may have been added/removed, or content above the board may have moved it.
+  useLayoutEffect(fit);
+  useEffect(() => {
+    const ro = new ResizeObserver(fit);
+    if (wrap.current) ro.observe(wrap.current);
+    window.addEventListener('resize', fit);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', fit);
+    };
+  }, [fit, wrap]);
+}
+
+/** When the board is wider than the screen, start it at the period that's on now. */
+function useScrollToNow(rota: RotaDetail, viewport: React.RefObject<HTMLDivElement | null>, density: Density) {
+  const today = dayjs().format(ISO);
+  const current = rota.periods.find((p) => p.start_date <= today && today <= p.end_date);
+  const target = current && current.index > 0 ? current.start_date : null;
+  useEffect(() => {
+    const v = viewport.current;
+    const th = target ? v?.querySelector<HTMLElement>(`thead th[data-day="${target}"]`) : null;
+    const name = v?.querySelector<HTMLElement>('thead .ag-name');
+    if (!v || !th || !name || v.scrollWidth <= v.clientWidth) return;
+    v.scrollLeft = th.offsetLeft - name.offsetWidth;
+  }, [viewport, target, density]);
+}
+
+/**
+ * A plain mouse wheel over the board scrolls it sideways through the days. Left alone when the
+ * board itself scrolls vertically (big teams), for trackpad sideways swipes and ctrl-zoom, and at
+ * either end so the page carries on scrolling instead of getting stuck.
+ */
+function useWheelScrollsSideways(viewport: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const v = viewport.current;
+    if (!v) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.shiftKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+      if (v.scrollWidth <= v.clientWidth || v.scrollHeight > v.clientHeight) return;
+      const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * v.clientWidth : e.deltaY;
+      const max = v.scrollWidth - v.clientWidth;
+      if ((dy < 0 && v.scrollLeft <= 0) || (dy > 0 && v.scrollLeft >= max - 1)) return;
+      e.preventDefault();
+      v.scrollLeft = Math.max(0, Math.min(max, v.scrollLeft + dy));
+    };
+    // Non-passive so preventDefault can stop the page scrolling as well.
+    v.addEventListener('wheel', onWheel, { passive: false });
+    return () => v.removeEventListener('wheel', onWheel);
+  }, [viewport]);
 }
 
 function cellFrom(target: EventTarget | null) {
@@ -168,6 +272,7 @@ const BoardTable = memo(function BoardTable({
   const periodStart = new Set(rota.periods.map((p) => p.start_date));
   const showAssignments = rota.shifts_visible && assignedIds.size > 0;
   const clickable = editable || undefined;
+  const today = dayjs().format(ISO);
   const dayInfo = rota.days.map((d) => {
     const dj = dayjs(d.date);
     return {
@@ -180,7 +285,17 @@ const BoardTable = memo(function BoardTable({
   });
 
   return (
-    <table className="ag-board" onClick={onClick} onMouseOver={onOver} onMouseLeave={onLeave}>
+    <table
+      className="ag-board"
+      // Day columns share the width that's left; below the minimum cell size the board scrolls.
+      style={{ minWidth: `calc(var(--ag-name-w) + ${rota.days.length} * var(--ag-cell-min))` }}
+      onClick={onClick}
+      onMouseOver={onOver}
+      onMouseLeave={onLeave}
+    >
+      <colgroup>
+        <col className="ag-name-col" />
+      </colgroup>
       <thead>
         <tr>
           <th className="ag-name" />
@@ -191,7 +306,7 @@ const BoardTable = memo(function BoardTable({
               className="ag-period-start"
               style={{ padding: '2px 4px' }}
             >
-              <Text size="xs" fw={700} truncate>
+              <Text fz="var(--ag-head-fs)" fw={700} truncate>
                 {rota.period_days >= 3
                   ? `P${p.index + 1} · ${dayjs(p.start_date).format('D MMM')}`
                   : `P${p.index + 1}`}
@@ -214,12 +329,16 @@ const BoardTable = memo(function BoardTable({
               data-d={d.holiday ? d.date : undefined}
               data-u={d.holiday ? 'header' : undefined}
               data-tip={d.holiday ? label : undefined}
+              data-day={d.date}
+              data-today={d.date === today || undefined}
             >
               <div style={{ lineHeight: 1.1, padding: '2px 0' }}>
-                <div style={{ fontSize: 9, color: 'var(--mantine-color-dimmed)' }}>
-                  {dj.format('dd')[0]}
+                {/* Which weekday label shows depends on the board density (see styles.css). */}
+                <div className="ag-dow">
+                  <span className="ag-dow-short">{dj.format('dd')[0]}</span>
+                  <span className="ag-dow-long">{dj.format('ddd')}</span>
                 </div>
-                <div>{dj.date()}</div>
+                <div className="ag-dom">{dj.date()}</div>
               </div>
             </th>
           ))}
@@ -229,7 +348,7 @@ const BoardTable = memo(function BoardTable({
         {showAssignments && (
           <tr className="ag-oncall-row">
             <td className="ag-name">
-              <Text size="xs" fw={700}>
+              <Text fz="var(--ag-fs)" fw={700}>
                 On call
               </Text>
             </td>
@@ -260,7 +379,7 @@ const BoardTable = memo(function BoardTable({
                           background: `var(--mantine-color-${personColor(user.id)}-filled)`,
                           color: 'white',
                           fontWeight: 700,
-                          fontSize: 9,
+                          fontSize: 'var(--ag-fs-sm)',
                           boxShadow:
                             split || uncovered
                               ? 'inset 0 -4px 0 var(--ag-unavailable-strong)'
@@ -269,7 +388,14 @@ const BoardTable = memo(function BoardTable({
                       : undefined
                   }
                 >
-                  {user ? initials(user.name) : '!'}
+                  {user ? (
+                    <>
+                      <span className="ag-who-short">{initials(user.name)}</span>
+                      <span className="ag-who-long">{user.name.split(' ')[0]}</span>
+                    </>
+                  ) : (
+                    '!'
+                  )}
                   {d.locked && <span className="ag-pin" />}
                 </td>
               );
@@ -350,17 +476,17 @@ const PersonRow = memo(
           style={me ? { boxShadow: 'inset 3px 0 0 var(--mantine-color-gator-6)' } : undefined}
         >
           <Group gap={6} wrap="nowrap">
-            <Avatar size={20} radius="xl" color={personColor(userId)}>
-              <Text fz={9} fw={700}>
+            <Avatar size="var(--ag-avatar)" radius="xl" color={personColor(userId)}>
+              <Text fz="var(--ag-fs-sm)" fw={700}>
                 {initials(name)}
               </Text>
             </Avatar>
             <Text
-              size="xs"
+              fz="var(--ag-fs)"
               truncate
               c={onCall ? undefined : 'dimmed'}
               fw={me ? 700 : undefined}
-              style={{ maxWidth: 120 }}
+              style={{ minWidth: 0 }}
             >
               {name}
             </Text>

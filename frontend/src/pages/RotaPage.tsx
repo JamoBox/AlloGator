@@ -124,7 +124,8 @@ export function RotaPage() {
         )}
       </Group>
 
-      {leader && !r.imported && <Workflow rota={r} />}
+      {/* Once published every step is done, so the stepper would only push the board down. */}
+      {leader && !r.imported && r.status !== 'published' && <Workflow rota={r} />}
       {!leader && <MemberBanner rota={r} />}
 
       <Tabs value={currentTab} onChange={setTab} keepMounted={false}>
