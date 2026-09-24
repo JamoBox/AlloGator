@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AlloGator">
   <defs>
     <clipPath id="tile"><path d="M16 20H48A10 10 0 0 1 58 30V44A10 10 0 0 1 48 54H16A10 10 0 0 1 6 44V30A10 10 0 0 1 16 20Z"/></clipPath>
-    <mask id="eyes"><rect width="64" height="64" fill="#fff"/><circle cx="21" cy="17.5" r="4" fill="#000"/><circle cx="43" cy="17.5" r="4" fill="#000"/></mask>
+    <mask id="eyes"><rect width="64" height="64" fill="#fff"/><circle cx="21" cy="17.5" r="4" fill="#000"/><circle cx="43" cy="17.5" r="4" fill="#000"/><ellipse cx="28" cy="31" rx="1.4" ry="2.3" transform="rotate(-25 28 31)" fill="#000"/><ellipse cx="36" cy="31" rx="1.4" ry="2.3" transform="rotate(25 36 31)" fill="#000"/></mask>
   </defs>
   <g class="mark" fill="#2f9e44">
     <g mask="url(#eyes)">

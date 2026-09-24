@@ -10,8 +10,8 @@ const LOWER_JAW =
 
 /**
  * The AlloGator mark: a gator peeking out of a calendar tile, its eyes doubling as the binder
- * rings and its teeth as the zigzag between the jaws. Flat and single-colour (it follows the
- * primary colour). `chomping` works the jaws (used while we're busy), `sleepy` closes its eyes
+ * rings and its teeth as the zigzag between the jaws, with a pair of nostrils on its snout. Flat
+ * and single-colour (it follows the primary colour). `chomping` works the jaws (used while we're busy), `sleepy` closes its eyes
  * and mouth (used for "nothing to do" states). Hovering the header logo snaps it shut.
  */
 export function CrocLogo({
@@ -61,6 +61,8 @@ export function CrocLogo({
               <circle cx="43" cy="17.5" r="4" fill="#000" />
             </>
           )}
+          <ellipse cx="28" cy="31" rx="1.4" ry="2.3" transform="rotate(-25 28 31)" fill="#000" />
+          <ellipse cx="36" cy="31" rx="1.4" ry="2.3" transform="rotate(25 36 31)" fill="#000" />
         </mask>
       </defs>
       <g className="croc-upper">
