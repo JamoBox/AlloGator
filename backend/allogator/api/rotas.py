@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,7 @@ from ..schemas import (
 )
 from ..services import segments as seg
 from ..services.analysis import analyze
+from ..services.hints import candidate_hints
 from ..services.notify import Notifier, audit
 from ..services.scheduling import (
     eligible_memberships,
@@ -405,6 +406,26 @@ def rota_analysis(
     if rota.status != ROTA_PUBLISHED and not is_leader(db, rota.team_id, user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "The schedule isn't published yet")
     return analyze(db, rota)
+
+
+@router.get("/rotas/{rota_id}/hints")
+def rota_hints(
+    rota_id: int,
+    start: date = Query(alias="from"),
+    end: date | None = Query(default=None, alias="to"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Who should take these dates? Per-person hints from the team's on-call history."""
+    rota = get_rota(db, rota_id)
+    require_leader(db, rota.team_id, user)
+    end = end or start
+    if end < start or start < rota.start_date or end > rota.last_date:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dates must be within the rota")
+    if (end - start).days > 62:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick at most two months at a time")
+    days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    return candidate_hints(db, rota, days)
 
 
 def _assign_interval(rota: Rota, grid: RotaGrid, body: AssignRequest):

@@ -9,11 +9,14 @@ most one person. Priorities, from most to least important (encoded as objective 
    days, then the number of mid-period handovers.
 3. Avoid days people marked as "partially available".
 4. Share the load fairly (sum of squared on-call days, offset by recent history).
-5. Avoid giving someone back-to-back periods (and, more weakly, a gap of just one period).
-6. Seeded random tie-breaking, so "regenerate" can offer a different, equally good rota.
+5. Share unpopular days (public holidays, team special days) fairly over time: sum of
+   squared holiday counts, including holidays covered in recent rotas.
+6. Avoid giving someone back-to-back periods (and, more weakly, a gap of just one period).
+7. Seeded random tie-breaking, so "regenerate" can offer a different, equally good rota.
 
 Hard constraints: nobody is scheduled on a day they marked unavailable, and pinned days
-(locked by a leader) keep their assignment.
+(locked by a leader) keep their assignment. Partial cover only happens on days a period's owner
+is unavailable, which is what keeps the model small and the solver snappy.
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ W_HANDOVER = 1_000
 W_BACK_TO_BACK = 1_500
 W_GAP_ONE = 300
 W_FAIRNESS = 20
+W_HOLIDAY_FAIRNESS = 250
 W_RANDOM_MAX = 20
 
 
@@ -49,6 +53,8 @@ class SolverInput:
     history: dict[int, int] = field(default_factory=dict)  # user -> fairness offset (days)
     pinned: dict[int, int | None] = field(default_factory=dict)  # day -> user (None = gap)
     previous_owner: int | None = None  # on call immediately before the rota starts
+    holidays: set[int] = field(default_factory=set)  # day indices of unpopular days
+    holiday_history: dict[int, int] = field(default_factory=dict)  # user -> recent holiday days
     avoid_back_to_back: bool = True
     seed: int = 0
     time_limit: float = 10.0  # hard cap
@@ -67,116 +73,146 @@ class SolverResult:
 
 
 def solve(inp: SolverInput) -> SolverResult:
+    """Period-first model: each period gets an owner who covers every day they're available
+    (and not pinned to someone else). Cover variables exist only for days an owner might be
+    unavailable, which keeps the model small so CP-SAT converges quickly."""
     started = time.monotonic()
     rng = random.Random(inp.seed)
     members = list(dict.fromkeys(inp.members))
-    pinned_users = {u for u in inp.pinned.values() if u is not None}
-    people = members + [u for u in sorted(pinned_users) if u not in members]
-    member_set = set(members)
+    unav = {u: inp.unavailable.get(u, set()) for u in members}
+    limited = {u: inp.limited.get(u, set()) for u in members}
+    n_periods = len(inp.periods)
+    period_of = [0] * inp.num_days
+    for p, (a, b) in enumerate(inp.periods):
+        for d in range(a, b):
+            period_of[d] = p
+    open_days = [d for d in range(inp.num_days) if d not in inp.pinned]
 
     m = cp_model.CpModel()
-
-    # x[u, d]: person u is on call for day d.
-    x: dict[tuple[int, int], cp_model.IntVar] = {}
-    for u in people:
-        unavailable = inp.unavailable.get(u, set())
-        for d in range(inp.num_days):
-            if d in inp.pinned:
-                if inp.pinned[d] == u:
-                    x[u, d] = m.new_bool_var(f"x_{u}_{d}")
-                    m.add(x[u, d] == 1)
-                continue
-            if u in member_set and d not in unavailable:
-                x[u, d] = m.new_bool_var(f"x_{u}_{d}")
-
-    by_day: dict[int, list[cp_model.IntVar]] = {d: [] for d in range(inp.num_days)}
-    for (_u, d), var in x.items():
-        by_day[d].append(var)
-
-    uncovered: dict[int, cp_model.IntVar] = {}
-    for d in range(inp.num_days):
-        if d in inp.pinned and inp.pinned[d] is None:
-            continue  # deliberately left empty by a leader
-        unc = m.new_bool_var(f"unc_{d}")
-        uncovered[d] = unc
-        m.add(sum(by_day[d]) + unc == 1)
-    for d, u in inp.pinned.items():
-        if u is None:
-            m.add(sum(by_day[d]) == 0)
-
     objective: list = []
-    objective.append(W_UNCOVERED * sum(uncovered.values()))
 
-    # y[u, p]: person u "owns" period p. Owner days are free; other people's days are cover.
+    # y[u, p]: u owns period p (covers its open days that they're available for).
     y: dict[tuple[int, int], cp_model.IntVar] = {}
     for p, (a, b) in enumerate(inp.periods):
+        if not any(d not in inp.pinned for d in range(a, b)):
+            continue  # fully pinned: no owner needed
         owners_p = []
-        split = m.new_bool_var(f"split_{p}")
-        cover_terms = []
-        for u in people:
-            days_u = [x[u, d] for d in range(a, b) if (u, d) in x]
-            if not days_u:
-                continue
-            yv = m.new_bool_var(f"y_{u}_{p}")
-            y[u, p] = yv
-            owners_p.append(yv)
-            m.add(yv <= sum(days_u))
-            for d in range(a, b):
-                if (u, d) not in x:
-                    continue
-                # own = x AND y ; cover = x AND NOT y
-                own = m.new_bool_var(f"own_{u}_{d}")
-                m.add(own <= x[u, d])
-                m.add(own <= yv)
-                cover_terms.append(x[u, d] - own)
+        for u in members:
+            y[u, p] = m.new_bool_var(f"y_{u}_{p}")
+            owners_p.append(y[u, p])
         if owners_p:
-            m.add(sum(owners_p) <= 1)
-        if cover_terms:
-            m.add(sum(cover_terms) <= (b - a) * split)
-            objective.append(W_COVER_DAY * sum(cover_terms))
-        objective.append(W_SPLIT_PERIOD * split)
+            m.add_exactly_one(owners_p)
 
-    # Mid-period handovers: a person starting a stint on a day that is not a period start.
-    period_starts = {a for a, _ in inp.periods}
-    for u in people:
-        for d in range(inp.num_days):
-            if d in period_starts or (u, d) not in x:
+    # c[v, d]: v covers open day d because the owner can't.
+    c: dict[tuple[int, int], cp_model.IntVar] = {}
+    need: dict[int, list] = {}
+    uncovered: dict[int, cp_model.IntVar] = {}
+    for d in open_days:
+        p = period_of[d]
+        blocked_owners = [y[u, p] for u in members if (u, p) in y and d in unav[u]]
+        if not blocked_owners:
+            continue
+        need[d] = blocked_owners
+        covers = []
+        for v in members:
+            if d in unav[v]:
                 continue
-            prev = x.get((u, d - 1))
-            start = m.new_bool_var(f"start_{u}_{d}")
-            if prev is None:
-                m.add(start >= x[u, d])
-            else:
-                m.add(start >= x[u, d] - prev)
-            objective.append(W_HANDOVER * start)
+            c[v, d] = m.new_bool_var(f"c_{v}_{d}")
+            m.add_implication(y[v, p], c[v, d].Not())  # the owner doesn't "cover" their own day
+            covers.append(c[v, d])
+        unc = m.new_bool_var(f"unc_{d}")
+        uncovered[d] = unc
+        m.add(sum(covers) + unc == sum(blocked_owners))
+    if not members:
+        for d in open_days:
+            uncovered[d] = m.new_constant(1)
+    objective.append(W_UNCOVERED * sum(uncovered.values()))
 
-    # Partially-available days.
-    for u in people:
-        for d in inp.limited.get(u, set()):
-            if (u, d) in x and inp.pinned.get(d) != u:
-                objective.append(W_LIMITED_DAY * x[u, d])
+    # Partial cover: split periods, cover days and mid-period handovers.
+    period_starts = {a for a, _ in inp.periods}
+    for p, (a, b) in enumerate(inp.periods):
+        terms = [c[v, d] for d in range(a, b) for v in members if (v, d) in c]
+        if not terms:
+            continue
+        split = m.new_bool_var(f"split_{p}")
+        m.add(sum(terms) <= (b - a) * split)
+        objective.append(W_SPLIT_PERIOD * split)
+        objective.append(W_COVER_DAY * sum(terms))
+        for v in members:
+            for d in range(a, b):
+                if (v, d) not in c:
+                    continue
+                # A cover stint starting mid-period (a handover to v and later back).
+                prev = c.get((v, d - 1)) if d - 1 >= a else None
+                start = m.new_bool_var(f"s_{v}_{d}")
+                m.add(start >= c[v, d] - prev if prev is not None else start >= c[v, d])
+                objective.append(W_HANDOVER * (2 if d not in period_starts else 1) * start)
+
+    # Per-person day counts as linear expressions.
+    pinned_count = {u: sum(1 for w in inp.pinned.values() if w == u) for u in members}
+
+    def owned_days(u: int, p: int, pred=lambda d: True) -> int:
+        a, b = inp.periods[p]
+        return sum(1 for d in range(a, b) if d not in inp.pinned and d not in unav[u] and pred(d))
+
+    load = {}
+    for u in members:
+        terms = [owned_days(u, p) * y[u, p] for p in range(n_periods) if (u, p) in y]
+        terms += [c[u, d] for d in open_days if (u, d) in c]
+        load[u] = sum(terms) + pinned_count[u]
+
+    # Partially-available days worked (by owners or covers).
+    for u in members:
+        if not limited[u]:
+            continue
+        for p in range(n_periods):
+            if (u, p) in y:
+                n = owned_days(u, p, lambda d, u=u: d in limited[u])
+                if n:
+                    objective.append(W_LIMITED_DAY * n * y[u, p])
+        for d in limited[u]:
+            if (u, d) in c:
+                objective.append(W_LIMITED_DAY * c[u, d])
 
     # Fairness: minimise sum of squares of (days this rota + history offset).
     for u in members:
-        load_terms = [x[u, d] for d in range(inp.num_days) if (u, d) in x]
         offset = int(inp.history.get(u, 0))
-        lo = min(0, offset)
-        hi = inp.num_days + max(0, offset)
+        lo, hi = min(0, offset), inp.num_days + max(0, offset)
         total = m.new_int_var(lo, hi, f"total_{u}")
-        m.add(total == sum(load_terms) + offset)
+        m.add(total == load[u] + offset)
         sq = m.new_int_var(0, max(lo * lo, hi * hi), f"sq_{u}")
         m.add_multiplication_equality(sq, [total, total])
         objective.append(W_FAIRNESS * sq)
 
+    # Unpopular days: spread them out, taking recent history into account. The squared total
+    # (history + k)^2 is written exactly as increasing step costs over ordered booleans
+    # (k >= 1, k >= 2, ...), which CP-SAT handles far better than a multiplication.
+    if inp.holidays:
+        n_hol = len(inp.holidays)
+        for u in members:
+            hist = max(0, int(inp.holiday_history.get(u, 0)))
+            terms = [
+                owned_days(u, p, lambda d: d in inp.holidays) * y[u, p]
+                for p in range(n_periods)
+                if (u, p) in y
+            ]
+            terms += [c[u, d] for d in inp.holidays if (u, d) in c]
+            pinned_hol = sum(1 for d, w in inp.pinned.items() if w == u and d in inp.holidays)
+            steps = [m.new_bool_var(f"hol_{u}_{j}") for j in range(1, n_hol + 1)]
+            for a, b in zip(steps, steps[1:], strict=False):
+                m.add_implication(b, a)
+            m.add(sum(steps) == sum(terms) + pinned_hol)
+            for j, step in enumerate(steps, start=1):
+                objective.append(W_HOLIDAY_FAIRNESS * (2 * hist + 2 * j - 1) * step)
+
     # Spacing between one person's periods.
     if inp.avoid_back_to_back:
-        n_periods = len(inp.periods)
-        for u in people:
+        for u in members:
+            if inp.previous_owner == u and (u, 0) in y:
+                objective.append(W_BACK_TO_BACK * y[u, 0])
             for p in range(n_periods):
                 if (u, p) not in y:
                     continue
-                if p == 0 and inp.previous_owner == u:
-                    objective.append(W_BACK_TO_BACK * y[u, 0])
                 if (u, p + 1) in y:
                     bb = m.new_bool_var(f"bb_{u}_{p}")
                     m.add(bb >= y[u, p] + y[u, p + 1] - 1)
@@ -191,6 +227,7 @@ def solve(inp: SolverInput) -> SolverResult:
         objective.append(rng.randint(0, W_RANDOM_MAX) * var)
 
     m.minimize(sum(objective))
+    _add_greedy_hint(m, inp, y, members, unav)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = max(0.5, inp.time_limit)
@@ -203,14 +240,23 @@ def solve(inp: SolverInput) -> SolverResult:
         log.warning("CP-SAT returned %s; falling back to greedy assignment", status_name)
         return _greedy(inp, started, status_name)
 
-    assignment: list[int | None] = [None] * inp.num_days
-    for (u, d), var in x.items():
-        if solver.value(var):
-            assignment[d] = u
-    owners: list[int | None] = [None] * len(inp.periods)
+    owners: list[int | None] = [None] * n_periods
     for (u, p), var in y.items():
         if solver.value(var):
             owners[p] = u
+    assignment: list[int | None] = [None] * inp.num_days
+    for d in range(inp.num_days):
+        if d in inp.pinned:
+            assignment[d] = inp.pinned[d]
+            continue
+        owner = owners[period_of[d]]
+        if owner is not None and d not in unav[owner]:
+            assignment[d] = owner
+            continue
+        for v in members:
+            if (v, d) in c and solver.value(c[v, d]):
+                assignment[d] = v
+                break
     return SolverResult(
         assignment=assignment,
         owners=owners,
@@ -221,6 +267,30 @@ def solve(inp: SolverInput) -> SolverResult:
     )
 
 
+def _add_greedy_hint(m, inp: SolverInput, y, members, unav) -> None:
+    """Hint a sensible starting point (least-loaded, most-available owner per period, avoiding
+    back-to-back) so the first solution CP-SAT finds is already decent."""
+    load = {u: int(inp.history.get(u, 0)) for u in members}
+    prev = inp.previous_owner
+    for p, (a, b) in enumerate(inp.periods):
+        cands = [u for u in members if (u, p) in y]
+        if not cands:
+            continue
+        best = min(
+            cands,
+            key=lambda u: (sum(1 for d in range(a, b) if d in unav[u]), u == prev, load[u]),
+        )
+        for u in cands:
+            m.add_hint(y[u, p], 1 if u == best else 0)
+        load[best] += b - a
+        prev = best
+
+
+# Improvements smaller than this are tie-break noise (random costs are at most W_RANDOM_MAX per
+# choice; the smallest real gain, one step of day fairness, is 2 * W_FAIRNESS).
+SIGNIFICANT_IMPROVEMENT = 30
+
+
 class _Progress(cp_model.CpSolverSolutionCallback):
     def __init__(self) -> None:
         super().__init__()
@@ -229,9 +299,10 @@ class _Progress(cp_model.CpSolverSolutionCallback):
 
     def on_solution_callback(self) -> None:
         obj = self.objective_value
-        if self.best is None or obj < self.best - 1e-9:
-            self.best = obj
+        if self.best is None or obj < self.best - SIGNIFICANT_IMPROVEMENT:
             self.last_improvement = time.monotonic()
+        if self.best is None or obj < self.best:
+            self.best = obj
 
 
 def _solve_with_stall_limit(solver: cp_model.CpSolver, model: cp_model.CpModel, stall: float):

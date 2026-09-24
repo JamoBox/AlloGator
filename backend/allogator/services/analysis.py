@@ -25,8 +25,16 @@ from ..models import (
     User,
 )
 from . import segments as seg
-from .scheduling import fairness_offsets, load_unavailability, rota_segments, team_memberships
+from .history import team_history
+from .scheduling import (
+    HOLIDAY_LOOKBACK,
+    fairness_offsets,
+    load_unavailability,
+    rota_segments,
+    team_memberships,
+)
 from .slots import DaySlot, RotaGrid
+from .special_days import team_special_days
 
 _EPSILON = timedelta(microseconds=1)
 
@@ -87,6 +95,11 @@ def _fmt_range(a: date, b: date) -> str:
     return f"{a:%a %d %b} – {b:%a %d %b}"
 
 
+def _labels(days: list[date], specials: dict[date, str]) -> str:
+    names = list(dict.fromkeys(specials[d] for d in days if d in specials))
+    return f" ({', '.join(names)})" if names else ""
+
+
 def analyze(db: Session, rota: Rota) -> dict[str, Any]:
     grid = RotaGrid.for_rota(rota)
     segs = rota_segments(rota)
@@ -97,6 +110,7 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
     all_ids = sorted(set(member_by_user) | assigned_ids)
     users = {u.id: u for u in db.scalars(select(User).where(User.id.in_(all_ids)))}
     unav = load_unavailability(db, all_ids, grid.start_date, grid.end_date)
+    specials = team_special_days(db, rota.team, grid.start_date, grid.end_date)
     per_day = seg.day_assignments(segs, grid)
     submitted = {s.user_id for s in rota.submissions}
     has_schedule = bool(rota.shifts)
@@ -147,7 +161,7 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
             add(
                 "uncovered",
                 "error",
-                f"No cover: {_fmt_range(days[0], days[-1])}",
+                f"No cover: {_fmt_range(days[0], days[-1])}{_labels(days, specials)}",
                 detail,
                 period_index=run[0].period_index,
                 start_date=days[0],
@@ -280,6 +294,13 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
 
     # --- Stats --------------------------------------------------------------------------
     _, hist = fairness_offsets(db, rota, eligible, rota.team.fairness_lookback_days)
+    since = grid.start_date - HOLIDAY_LOOKBACK
+    past_specials = team_special_days(db, rota.team, since, grid.start_date)
+    past = team_history(db, rota.team_id, since, grid.start_date, exclude_rota_id=rota.id)
+    holiday_now: dict[int, int] = defaultdict(int)
+    for slot, pieces in zip(grid.days, per_day, strict=True):
+        if slot.day in specials and (uid := seg.day_majority(pieces)) is not None:
+            holiday_now[uid] += 1
     day_share: dict[int, float] = defaultdict(float)
     for slot, pieces in zip(grid.days, per_day, strict=True):
         total = (slot.end - slot.start).total_seconds()
@@ -314,6 +335,10 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
                 "unavailable_days": sum(1 for e in entries.values() if e.kind == AVAIL_UNAVAILABLE),
                 "partial_days": sum(1 for e in entries.values() if e.kind == AVAIL_PARTIAL),
                 "history_days": round(hist.get(uid, 0.0), 1),
+                "holiday_days": holiday_now.get(uid, 0),
+                "holiday_history": sum(1 for d in past[uid].days if d in past_specials)
+                if uid in past
+                else 0,
                 "submitted": uid in submitted,
             }
         )
@@ -326,6 +351,7 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
             1 for pieces in per_day if has_schedule and any(p.user_id is None for p in pieces)
         ),
         "split_periods": sum(1 for i in issues if i["type"] == "partial_cover"),
+        "holidays": len(specials),
         "owners": owners,
     }
     return {"issues": issues, "stats": stats, "summary": summary, "solver": rota.solver_info}

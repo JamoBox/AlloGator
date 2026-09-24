@@ -160,6 +160,30 @@ def previous_owner(db: Session, rota: Rota) -> int | None:
     )
 
 
+HOLIDAY_LOOKBACK = timedelta(days=730)
+
+
+def _holiday_inputs(
+    db: Session, rota: Rota, grid: RotaGrid, member_ids: list[int]
+) -> tuple[set[int], dict[int, int]]:
+    """Day indices of unpopular days in the rota, and how many each person did recently."""
+    from .history import team_history
+    from .special_days import team_special_days
+
+    team = rota.team
+    upcoming = team_special_days(db, team, grid.start_date, grid.end_date)
+    idx = {i for d in upcoming if (i := grid.day_index(d)) is not None}
+    if not idx:
+        return set(), {}
+    since = rota.start_date - HOLIDAY_LOOKBACK
+    past_specials = team_special_days(db, team, since, rota.start_date)
+    past = team_history(db, team.id, since, rota.start_date, exclude_rota_id=rota.id)
+    counts = {
+        u: sum(1 for d in past[u].days if d in past_specials) for u in member_ids if u in past
+    }
+    return idx, counts
+
+
 def generate(
     db: Session,
     rota: Rota,
@@ -198,6 +222,7 @@ def generate(
                 limited[user_id].add(idx)
 
     offsets, _ = fairness_offsets(db, rota, memberships, team.fairness_lookback_days)
+    holiday_idx, holiday_history = _holiday_inputs(db, rota, grid, member_ids)
     if seed is None:
         seed = random.randrange(1, 2**31)
 
@@ -211,6 +236,8 @@ def generate(
             history=offsets,
             pinned=pinned,
             previous_owner=previous_owner(db, rota),
+            holidays=holiday_idx,
+            holiday_history=holiday_history,
             avoid_back_to_back=team.avoid_back_to_back,
             seed=seed,
             time_limit=time_limit if time_limit is not None else settings.solver_time_limit_seconds,
@@ -233,6 +260,7 @@ def generate(
         "pinned_days": len(pinned),
         "kept_locked": keep_locked,
         "history_offsets": {str(k): v for k, v in offsets.items()},
+        "holiday_days": len(holiday_idx),
     }
     if rota.status != ROTA_PUBLISHED:
         rota.status = ROTA_REVIEW

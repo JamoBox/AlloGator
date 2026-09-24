@@ -16,6 +16,7 @@ from ..models import Membership, Notification, User, utcnow
 from ..schemas import AdminUserOut, AdminUserUpdate, MarkRead, NotificationOut, UserOut
 from ..services.email import OUTBOX
 from ..services.ics import build_calendar
+from ..services.special_days import supported_countries
 from .me import my_published_shifts
 
 router = APIRouter(tags=["misc"])
@@ -37,6 +38,11 @@ def app_config():
         "base_url": s.base_url,
         "logout_url": s.logout_url,
     }
+
+
+@router.get("/api/holidays/countries")
+def holiday_countries(_: User = Depends(get_current_user)):
+    return supported_countries()
 
 
 # --- Notifications -------------------------------------------------------------------------

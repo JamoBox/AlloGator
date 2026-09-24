@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     app = FastAPI(title="AlloGator", version=__version__, lifespan=lifespan)
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
     for r in (me.router, teams.router, rotas.router, swaps.router, misc.router):
         app.include_router(r)
 
@@ -45,10 +47,20 @@ def create_app() -> FastAPI:
     return app
 
 
+class ImmutableStaticFiles(StaticFiles):
+    """Built assets have content hashes in their names, so browsers can cache them forever."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 def _mount_spa(app: FastAPI, static: Path) -> None:
     index = static / "index.html"
     if (static / "assets").is_dir():
-        app.mount("/assets", StaticFiles(directory=static / "assets"), name="assets")
+        app.mount("/assets", ImmutableStaticFiles(directory=static / "assets"), name="assets")
 
     @app.get("/{path:path}", include_in_schema=False)
     async def spa(path: str, request: Request):

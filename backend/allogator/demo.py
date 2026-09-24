@@ -19,6 +19,7 @@ from .models import (
     AvailabilitySubmission,
     Membership,
     Rota,
+    SpecialDay,
     SwapOffer,
     SwapRequest,
     Team,
@@ -27,8 +28,9 @@ from .models import (
     utcnow,
 )
 from .services import segments as seg
-from .services.scheduling import generate, rota_segments
+from .services.scheduling import generate, rota_segments, write_segments
 from .services.slots import RotaGrid
+from .services.special_days import public_holidays
 
 DEMO_TEAM = "Platform SRE"
 PEOPLE = [
@@ -43,6 +45,31 @@ PEOPLE = [
 
 def _monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
+
+
+def _unpopular_day(db: Session, team: Team, start: date, end: date) -> tuple[date, str]:
+    """The first public holiday in [start, end), or a made-up company day if there isn't one."""
+    hols = public_holidays(team.holiday_country, team.holiday_subdivision, start, end)
+    if hols:
+        d = min(hols)
+        return d, hols[d]
+    return start + timedelta(weeks=6, days=4), "Company all-hands"
+
+
+def _same_day_last_year(team: Team, day: date, name: str) -> date:
+    prev = public_holidays(
+        team.holiday_country,
+        team.holiday_subdivision,
+        date(day.year - 1, 1, 1),
+        date(day.year, 1, 1),
+    )
+    for d, n in prev.items():
+        if n == name:
+            return d
+    try:
+        return day.replace(year=day.year - 1)
+    except ValueError:
+        return day - timedelta(days=365)
 
 
 def seed_demo(db: Session, today: date | None = None) -> dict[str, Any]:
@@ -69,6 +96,8 @@ def seed_demo(db: Session, today: date | None = None) -> dict[str, Any]:
         default_num_periods=8,
         default_handover_weekday=0,
         default_handover_time="09:00",
+        holiday_country="GB",
+        holiday_subdivision="ENG",
     )
     db.add(team)
     db.flush()
@@ -76,6 +105,58 @@ def seed_demo(db: Session, today: date | None = None) -> dict[str, Any]:
     for email, _, role in PEOPLE:
         db.add(Membership(team_id=team.id, user_id=users[email].id, role=role, joined_at=long_ago))
     db.flush()
+
+    # History: last year's rota around the same holiday as the upcoming rota's, so the
+    # decision hints have something to say ("Sam covered Christmas Day last year").
+    upcoming_start = _monday(today) + timedelta(weeks=4)
+    upcoming_end = upcoming_start + timedelta(weeks=12)
+    target_day, target_name = _unpopular_day(db, team, upcoming_start, upcoming_end)
+    past_day = _same_day_last_year(team, target_day, target_name)
+    if not public_holidays(
+        team.holiday_country, team.holiday_subdivision, target_day, target_day + timedelta(days=1)
+    ):
+        db.add(SpecialDay(team_id=team.id, day=target_day, label=target_name))
+        db.add(SpecialDay(team_id=team.id, day=past_day, label=target_name))
+    past = Rota(
+        team_id=team.id,
+        name="Last year",
+        start_date=_monday(past_day) - timedelta(weeks=2),
+        num_periods=6,
+        period_days=7,
+        handover_time="09:00",
+        timezone=team.timezone,
+        status=ROTA_COLLECTING,
+        created_by_id=users["leader@example.com"].id,
+    )
+    db.add(past)
+    db.flush()
+    db.refresh(team)
+    generate(db, past, seed=3, time_limit=5)
+    past_grid = RotaGrid.for_rota(past)
+    holiday_period = past_grid.periods[past_grid.days[past_grid.day_index(past_day)].period_index]
+    past_segs = seg.reassign(
+        rota_segments(past),
+        past_grid,
+        holiday_period.start,
+        holiday_period.end,
+        users["sam@example.com"].id,
+        source="generated",
+    )
+    # Taylor stepped in for two days of someone else's week, so has done "extra" cover.
+    other = past_grid.periods[(holiday_period.index + 2) % len(past_grid.periods)]
+    cover_start = past_grid.days[other.first_day + 1]
+    past_segs = seg.reassign(
+        past_segs,
+        past_grid,
+        cover_start.start,
+        past_grid.days[other.first_day + 2].end,
+        users["taylor@example.com"].id,
+        source="swap",
+        note="Covered for a teammate",
+    )
+    write_segments(db, past, past_segs)
+    past.status = ROTA_PUBLISHED
+    past.published_at = utcnow() - timedelta(days=330)
 
     # Current rota: started four weeks ago, runs four more weeks. Published.
     current_start = _monday(today) - timedelta(weeks=4)
@@ -106,12 +187,11 @@ def seed_demo(db: Session, today: date | None = None) -> dict[str, Any]:
     db.flush()
 
     # Upcoming rota: collecting availability.
-    upcoming_start = current.end_date
     upcoming = Rota(
         team_id=team.id,
         name="",
         start_date=upcoming_start,
-        num_periods=8,
+        num_periods=12,
         period_days=7,
         handover_time="09:00",
         timezone=team.timezone,
@@ -149,6 +229,12 @@ def seed_demo(db: Session, today: date | None = None) -> dict[str, Any]:
         if email != "chris@example.com":
             mark(email, gap_day, 1, note="Company offsite")
     mark("chris@example.com", gap_day, 1, AVAIL_UNAVAILABLE, "Moving house")
+    # The unpopular day: nobody wants it (a leader will need to decide).
+    for email, _, _ in PEOPLE:
+        if email == "jordan@example.com":
+            mark(email, target_day, 1, note="Could maybe do the evening if desperate")
+        else:
+            mark(email, target_day, 1, note=f"Away for {target_name}")
     for email in ("sam@example.com", "jordan@example.com", "priya@example.com"):
         db.add(
             AvailabilitySubmission(
@@ -202,6 +288,7 @@ def seed_demo(db: Session, today: date | None = None) -> dict[str, Any]:
         "team_id": team.id,
         "current_rota_id": current.id,
         "upcoming_rota_id": upcoming.id,
+        "unpopular_day": f"{target_day} ({target_name})",
         "swap_request_id": swap_info,
         "users": [email for email, _, _ in PEOPLE],
     }

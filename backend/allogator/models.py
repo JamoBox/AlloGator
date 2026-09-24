@@ -100,6 +100,11 @@ class Team(Base):
     # Scheduling preferences
     avoid_back_to_back: Mapped[bool] = mapped_column(Boolean, default=True)
     fairness_lookback_days: Mapped[int] = mapped_column(Integer, default=180)
+    # Public holidays (ISO country code + optional subdivision, via the `holidays` package).
+    # Holidays and custom special days are "unpopular" days that the scheduler shares out
+    # fairly over time and that leaders get history-based hints for.
+    holiday_country: Mapped[str] = mapped_column(String(8), default="", server_default="")
+    holiday_subdivision: Mapped[str] = mapped_column(String(16), default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     memberships: Mapped[list[Membership]] = relationship(
@@ -178,6 +183,18 @@ class Rota(Base):
         if self.name:
             return self.name
         return f"{self.start_date:%d %b %Y} – {self.last_date:%d %b %Y}"
+
+
+class SpecialDay(Base):
+    """A team-defined unpopular day (e.g. company shutdown, peak sales day, code freeze)."""
+
+    __tablename__ = "special_days"
+    __table_args__ = (UniqueConstraint("team_id", "day"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
+    day: Mapped[date] = mapped_column(Date)
+    label: Mapped[str] = mapped_column(String(120))
 
 
 class Shift(Base):

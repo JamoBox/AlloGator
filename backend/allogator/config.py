@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -54,8 +55,9 @@ class Settings(BaseSettings):
     # --- Scheduling -------------------------------------------------------------------------
     solver_time_limit_seconds: float = 20.0
     # Stop searching once the best rota hasn't improved for this long.
-    solver_stall_seconds: float = 2.0
-    solver_workers: int = 8
+    solver_stall_seconds: float = 1.0
+    # Parallel search workers; defaults to the number of CPUs (max 8).
+    solver_workers: int = min(8, os.cpu_count() or 4)
 
     # Built frontend to serve (the SPA). Empty = autodetect ../frontend/dist.
     static_dir: str = ""

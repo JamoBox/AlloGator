@@ -91,6 +91,8 @@ class TeamSettings(BaseModel):
     default_handover_time: str | None = None
     avoid_back_to_back: bool | None = None
     fairness_lookback_days: int | None = Field(default=None, ge=0, le=3650)
+    holiday_country: str | None = Field(default=None, max_length=8)
+    holiday_subdivision: str | None = Field(default=None, max_length=16)
 
     @field_validator("timezone")
     @classmethod
@@ -129,6 +131,8 @@ class TeamOut(_Out):
     default_handover_time: str
     avoid_back_to_back: bool
     fairness_lookback_days: int
+    holiday_country: str
+    holiday_subdivision: str
     my_role: str | None = None
     is_leader: bool = False
     member_count: int = 0
@@ -224,6 +228,7 @@ class DayOut(BaseModel):
     user_ids: list[int | None]
     majority: int | None
     locked: bool
+    holiday: str | None = None
 
 
 class ShiftOut(BaseModel):
@@ -302,6 +307,20 @@ class AvailabilityMatrix(BaseModel):
 
 class SubmitAvailability(BaseModel):
     comment: str = ""
+
+
+class SpecialDayOut(BaseModel):
+    id: int | None  # None for public holidays (not editable)
+    date: date
+    label: str
+    source: Literal["public", "custom"]
+    team_id: int | None = None
+    team_name: str | None = None
+
+
+class SpecialDayCreate(BaseModel):
+    date: date
+    label: str = Field(min_length=1, max_length=120)
 
 
 # --- Availability ----------------------------------------------------------------------------

@@ -39,6 +39,7 @@ from ..models import (
     Membership,
     Rota,
     Shift,
+    SpecialDay,
     Team,
     User,
     utcnow,
@@ -47,6 +48,8 @@ from ..schemas import (
     AuditOut,
     MemberAdd,
     MemberUpdate,
+    SpecialDayCreate,
+    SpecialDayOut,
     TeamCreate,
     TeamDetail,
     TeamOut,
@@ -57,6 +60,7 @@ from ..services import transfer
 from ..services.ics import build_calendar
 from ..services.notify import Notifier, audit
 from ..services.slots import RotaGrid, get_zone, utc_to_local
+from ..services.special_days import is_supported, public_holidays
 from .rotas import default_next_start
 from .serialize import schedule_shift, team_out, user_out
 
@@ -67,6 +71,13 @@ MAX_IMPORT_BYTES = 5 * 1024 * 1024
 
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "team"
+
+
+def _check_holidays(country: str, subdivision: str) -> None:
+    if not is_supported(country, subdivision):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Unknown holiday country/region for public holidays"
+        )
 
 
 @router.get("", response_model=list[TeamOut])
@@ -94,6 +105,7 @@ def create_team(
     if not (get_settings().open_team_creation or user.is_admin):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only admins can create teams")
     data = body.model_dump(exclude_none=True)
+    _check_holidays(data.get("holiday_country", ""), data.get("holiday_subdivision", ""))
     team = Team(**{**data, "name": body.name.strip()})
     db.add(team)
     try:
@@ -127,6 +139,13 @@ def update_team(
     team = get_team(db, team_id)
     require_leader(db, team.id, user)
     data = body.model_dump(exclude_unset=True, exclude_none=True)
+    if "holiday_country" in data or "holiday_subdivision" in data:
+        country = data.get("holiday_country", team.holiday_country)
+        sub = data.get("holiday_subdivision", team.holiday_subdivision)
+        if "holiday_country" in data and data["holiday_country"] != team.holiday_country:
+            sub = data.get("holiday_subdivision", "")
+            data["holiday_subdivision"] = sub
+        _check_holidays(country, sub)
     for k, v in data.items():
         setattr(team, k, v.strip() if k == "name" else v)
     try:
@@ -169,6 +188,85 @@ def rota_defaults(
         "period_days": team.default_period_days,
         "handover_time": team.default_handover_time,
     }
+
+
+# --- Special days ----------------------------------------------------------------------------
+
+
+@router.get("/{team_id}/special-days", response_model=list[SpecialDayOut])
+def list_special_days(
+    team_id: int,
+    start: date | None = Query(default=None, alias="from"),
+    end: date | None = Query(default=None, alias="to"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Public holidays (from the team's country) and custom special days in [from, to]."""
+    team = get_team(db, team_id)
+    require_member(db, team.id, user)
+    start = start or date.today() - timedelta(days=31)
+    end = end or start + timedelta(days=400)
+    stop = end + timedelta(days=1)
+    out = [
+        SpecialDayOut(id=None, date=d, label=label, source="public", team_id=team.id)
+        for d, label in public_holidays(
+            team.holiday_country, team.holiday_subdivision, start, stop
+        ).items()
+    ]
+    for sd in db.scalars(
+        select(SpecialDay).where(
+            SpecialDay.team_id == team.id, SpecialDay.day >= start, SpecialDay.day < stop
+        )
+    ):
+        out.append(
+            SpecialDayOut(id=sd.id, date=sd.day, label=sd.label, source="custom", team_id=team.id)
+        )
+    return sorted(out, key=lambda x: (x.date, x.source))
+
+
+@router.post("/{team_id}/special-days", response_model=SpecialDayOut, status_code=201)
+def add_special_day(
+    team_id: int,
+    body: SpecialDayCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    team = get_team(db, team_id)
+    require_leader(db, team.id, user)
+    sd = db.scalar(
+        select(SpecialDay).where(SpecialDay.team_id == team.id, SpecialDay.day == body.date)
+    )
+    if sd is None:
+        sd = SpecialDay(team_id=team.id, day=body.date, label=body.label.strip())
+        db.add(sd)
+    else:
+        sd.label = body.label.strip()
+    audit(
+        db,
+        "team.special_day",
+        f"Marked {body.date:%d %b %Y} as “{sd.label}”",
+        actor=user,
+        team_id=team.id,
+    )
+    db.commit()
+    return SpecialDayOut(id=sd.id, date=sd.day, label=sd.label, source="custom", team_id=team.id)
+
+
+@router.delete("/{team_id}/special-days/{special_day_id}", status_code=204)
+def delete_special_day(
+    team_id: int,
+    special_day_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    team = get_team(db, team_id)
+    require_leader(db, team.id, user)
+    sd = db.get(SpecialDay, special_day_id)
+    if sd is None or sd.team_id != team.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    db.delete(sd)
+    db.commit()
+    return Response(status_code=204)
 
 
 # --- Members ---------------------------------------------------------------------------------

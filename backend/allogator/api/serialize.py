@@ -37,6 +37,7 @@ from ..schemas import (
 from ..services import segments as seg
 from ..services.scheduling import load_unavailability, rota_segments
 from ..services.slots import RotaGrid, get_zone, utc_to_local
+from ..services.special_days import team_special_days
 
 
 def user_out(u: User | None) -> UserOut | None:
@@ -60,6 +61,8 @@ def team_out(db: Session, team: Team, user: User, detail: bool = False) -> TeamO
         "default_handover_time": team.default_handover_time,
         "avoid_back_to_back": team.avoid_back_to_back,
         "fairness_lookback_days": team.fairness_lookback_days,
+        "holiday_country": team.holiday_country,
+        "holiday_subdivision": team.holiday_subdivision,
         "my_role": m.role if m else None,
         "is_leader": bool((m and m.is_leader) or user.is_admin),
         "member_count": len(team.memberships),
@@ -136,6 +139,7 @@ def rota_detail(db: Session, rota: Rota, user: User) -> RotaDetail:
     visible = shifts_visible(db, rota, user)
     segs = rota_segments(rota) if visible else seg.empty(grid)
     per_day = seg.day_assignments(segs, grid)
+    specials = team_special_days(db, rota.team, grid.start_date, grid.end_date)
 
     periods = [
         PeriodOut(
@@ -164,6 +168,7 @@ def rota_detail(db: Session, rota: Rota, user: User) -> RotaDetail:
                 user_ids=ids,
                 majority=seg.day_majority(pieces),
                 locked=bool(pieces) and all(p.locked for p in pieces),
+                holiday=specials.get(slot.day),
             )
         )
     shifts = (

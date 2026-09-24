@@ -16,6 +16,7 @@ dependencies = [
     "ortools>=9.10",
     "icalendar>=6.0",
     "tzdata>=2024.1",
+    "holidays>=0.60",
 ]
 
 [project.optional-dependencies]

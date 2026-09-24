@@ -30,10 +30,12 @@ from ..schemas import (
     MeOut,
     MeUpdate,
     ScheduleShift,
+    SpecialDayOut,
     UnavailabilityBulk,
     UnavailabilityOut,
 )
 from ..services.ics import build_calendar
+from ..services.special_days import team_special_days
 from .serialize import rota_out, schedule_shift, swap_out
 
 router = APIRouter(prefix="/api/me", tags=["me"])
@@ -196,6 +198,32 @@ def set_unavailability(
             .order_by(Unavailability.day)
         )
     ]
+
+
+@router.get("/special-days", response_model=list[SpecialDayOut])
+def my_special_days(
+    start: date | None = Query(default=None, alias="from"),
+    end: date | None = Query(default=None, alias="to"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Holidays and special days for all of the user's teams (for the availability calendar)."""
+    start = start or date.today() - timedelta(days=31)
+    end = end or start + timedelta(days=400)
+    out = []
+    for team in db.scalars(select(Team).join(Membership).where(Membership.user_id == user.id)):
+        for d, label in team_special_days(db, team, start, end + timedelta(days=1)).items():
+            out.append(
+                SpecialDayOut(
+                    id=None,
+                    date=d,
+                    label=label,
+                    source="public",
+                    team_id=team.id,
+                    team_name=team.name,
+                )
+            )
+    return sorted(out, key=lambda x: (x.date, x.team_name or ""))
 
 
 # --- To-do ---------------------------------------------------------------------------------
