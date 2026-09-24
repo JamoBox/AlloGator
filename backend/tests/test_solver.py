@@ -1,3 +1,4 @@
+import random
 from collections import Counter
 
 from allogator.services.solver import SolverInput, solve
@@ -121,3 +122,28 @@ def test_regenerate_with_different_seed_can_differ_but_stays_valid():
     for owners in results:
         assert sorted(Counter(owners).values()) == [2, 2, 2]
     assert len(results) > 1
+
+
+def test_regenerate_varies_even_when_the_solver_stops_early():
+    # On a single worker the solver can stop close to its starting hint, so the hint itself
+    # must depend on the seed or "regenerate" keeps returning the same rota.
+    rng = random.Random(7)
+    members = list(range(10))
+    periods = weeks(26)
+    unavailable = {u: set(rng.sample(range(26 * 7), 6)) for u in members}
+    history = {u: rng.randint(-7, 7) for u in members}
+    results = [
+        tuple(
+            run(
+                num_days=26 * 7,
+                periods=periods,
+                members=members,
+                unavailable=unavailable,
+                history=history,
+                workers=1,
+                seed=s,
+            ).owners
+        )
+        for s in range(1, 5)
+    ]
+    assert len(set(results)) == len(results)
