@@ -32,6 +32,8 @@ export interface HighlightRange {
   start: string;
   end: string;
   label: string;
+  /** Still waiting for your dates: shaded, not just outlined. */
+  pending?: boolean;
 }
 
 interface Props {
@@ -71,8 +73,12 @@ export function AvailabilityCalendar({
 
   const byDate = useMemo(() => new Map(entries.map((e) => [e.date, e])), [entries]);
   const inRota = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const h of highlights) for (const d of eachDay(h.start, h.end)) m.set(d, h.label);
+    const m = new Map<string, { label: string; pending: boolean }>();
+    for (const h of highlights)
+      for (const d of eachDay(h.start, h.end)) {
+        const prev = m.get(d);
+        m.set(d, { label: prev ? `${prev.label}, ${h.label}` : h.label, pending: !!h.pending || !!prev?.pending });
+      }
     return m;
   }, [highlights]);
 
@@ -310,7 +316,7 @@ function MonthGrid({
   month: dayjs.Dayjs;
   today: string;
   byDate: Map<string, Unavailability>;
-  inRota: Map<string, string>;
+  inRota: Map<string, { label: string; pending: boolean }>;
   onCallDates?: Set<string>;
   specialDays?: Map<string, string>;
   selected: Set<string>;
@@ -349,7 +355,7 @@ function MonthGrid({
               : null,
             onCall ? "You're on call" : null,
             special ? `🎉 ${special}` : null,
-            rota ? `Dates requested: ${rota}` : null,
+            rota ? `${rota.pending ? 'Your dates are needed' : 'Dates confirmed'}: ${rota.label}` : null,
           ]
             .filter(Boolean)
             .join(' · ');
@@ -363,7 +369,7 @@ function MonthGrid({
               data-today={date === today || undefined}
               data-weekend={d.day() === 0 || d.day() === 6 || undefined}
               data-past={date < today || undefined}
-              data-in-rota={rota ? true : undefined}
+              data-in-rota={rota ? (rota.pending ? 'pending' : 'done') : undefined}
               data-special={special ? true : undefined}
               onPointerDown={(e) => onPointerDown(date, e)}
               onPointerEnter={() => onPointerEnter(date)}
@@ -402,7 +408,8 @@ function Legend() {
         { background: 'var(--ag-partial)', borderColor: 'var(--ag-partial-strong)', borderStyle: 'dashed' },
         'Partly available',
       )}
-      {item({ borderColor: 'var(--mantine-color-gator-5)', borderWidth: 2 }, 'Dates requested')}
+      {item({ background: 'var(--ag-requested)', borderColor: 'var(--ag-requested-strong)', borderWidth: 2 }, 'Dates needed')}
+      {item({ borderColor: 'var(--mantine-color-gator-5)', borderWidth: 2 }, 'Dates confirmed')}
       <Group gap={4} wrap="nowrap">
         <IconPhoneCall size={13} color="var(--mantine-color-gator-7)" />
         <Text size="xs" c="dimmed">

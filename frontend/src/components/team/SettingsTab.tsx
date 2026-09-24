@@ -4,7 +4,6 @@ import {
   Card,
   CloseButton,
   Group,
-  NumberInput,
   Select,
   SimpleGrid,
   Stack,
@@ -19,6 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 import { keys, useAction, useHolidayCountries, useSpecialDays } from '../../api/hooks';
 import type { TeamDetail } from '../../api/types';
+import { WholeNumberInput } from '../common';
 import { DateInput } from '@mantine/dates';
 import { dayjs, WEEKDAYS } from '../../lib/dates';
 import { timezoneOptions } from '../../pages/TeamsPage';
@@ -79,21 +79,21 @@ export function SettingsTab({ team }: { team: TeamDetail }) {
           Defaults for new rotas
         </Text>
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
-          <NumberInput
+          <WholeNumberInput
             label="Period length (days)"
             description="How long each person's on-call stint is"
             min={1}
             max={90}
             value={form.default_period_days}
-            onChange={(v) => set('default_period_days', Number(v) || 1)}
+            onChange={(v) => set('default_period_days', v)}
           />
-          <NumberInput
-            label="Periods to plan"
-            description="E.g. 8 one-week periods = plan 8 weeks ahead"
+          <WholeNumberInput
+            label="Periods to plan (if nobody is on call)"
+            description="New rotas default to one period per on-call person"
             min={1}
             max={104}
             value={form.default_num_periods}
-            onChange={(v) => set('default_num_periods', Number(v) || 1)}
+            onChange={(v) => set('default_num_periods', v)}
           />
           <Select
             label="Handover day"
@@ -121,13 +121,13 @@ export function SettingsTab({ team }: { team: TeamDetail }) {
             checked={form.avoid_back_to_back}
             onChange={(e) => set('avoid_back_to_back', e.currentTarget.checked)}
           />
-          <NumberInput
+          <WholeNumberInput
             label="Fairness look-back (days)"
             description="When balancing load, count on-call already done in this many days before the rota. 0 = only balance within each rota."
             min={0}
             max={3650}
             value={form.fairness_lookback_days}
-            onChange={(v) => set('fairness_lookback_days', Number(v) || 0)}
+            onChange={(v) => set('fairness_lookback_days', v)}
           />
         </Stack>
       </Card>

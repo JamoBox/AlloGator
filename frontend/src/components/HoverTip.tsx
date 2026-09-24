@@ -1,3 +1,4 @@
+import { Portal } from '@mantine/core';
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
 
 export interface HoverTipHandle {
@@ -19,10 +20,14 @@ export const HoverTip = forwardRef<HoverTipHandle>(function HoverTip(_, ref) {
     hide: () => setState((s) => (s ? null : s)),
   }));
   if (!state) return null;
+  // Portalled to <body>: inside a modal (which is transformed) "position: fixed" would be
+  // relative to the modal, misplacing the tip and making the modal scroll sideways.
   return (
-    <div className="ag-tip" style={{ left: state.x, top: state.y }} role="tooltip">
-      {state.text}
-    </div>
+    <Portal>
+      <div className="ag-tip" style={{ left: state.x, top: state.y }} role="tooltip">
+        {state.text}
+      </div>
+    </Portal>
   );
 });
 

@@ -11,6 +11,8 @@
   --ag-selected: var(--mantine-color-blue-6);
   --ag-holiday: var(--mantine-color-grape-0);
   --ag-holiday-strong: var(--mantine-color-grape-5);
+  --ag-requested: var(--mantine-color-blue-1);
+  --ag-requested-strong: var(--mantine-color-blue-5);
 }
 
 /* light-dark() can't be used for custom properties on :root (the colour-scheme attribute
@@ -25,6 +27,8 @@
   --ag-selected: var(--mantine-color-blue-4);
   --ag-holiday: rgba(190, 75, 219, 0.18);
   --ag-holiday-strong: var(--mantine-color-grape-4);
+  --ag-requested: rgba(34, 139, 230, 0.22);
+  --ag-requested-strong: var(--mantine-color-blue-4);
 }
 
 /* ---- Availability month calendar ---- */
@@ -78,6 +82,11 @@
 .ag-day[data-in-rota] {
   border-color: var(--mantine-color-gator-5);
   border-width: 2px;
+}
+/* A rota still waiting for your dates: shade the whole range so it stands out. */
+.ag-day[data-in-rota='pending'] {
+  background: var(--ag-requested);
+  border-color: var(--ag-requested-strong);
 }
 .ag-day[data-special]::before {
   content: '';
