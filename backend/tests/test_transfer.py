@@ -123,3 +123,16 @@ def test_member_exports_only_published(api):
     member.get(f"/api/teams/{team['id']}/export?format=json&rota_id={draft['id']}", expect=403)
     leader_data = api.get(f"/api/teams/{team['id']}/export?format=json").json()
     assert len(leader_data["rotas"]) == 2
+
+
+def test_csv_export_neutralises_formulas(api):
+    team = make_team(api, "Formula")
+    rota = _published_rota(api, team, weeks=1)
+    owner = rota["periods"][0]["owner_id"]
+    api.post(
+        f"/api/rotas/{rota['id']}/assign",
+        json={"user_id": owner, "period_index": 0, "note": '=HYPERLINK("http://evil")'},
+    )
+    text = api.get(f"/api/teams/{team['id']}/export?format=csv").text
+    assert "'=HYPERLINK" in text
+    assert ",=HYPERLINK" not in text

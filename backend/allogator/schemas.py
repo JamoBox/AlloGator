@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
-from typing import Any, Literal
+from datetime import UTC, date, datetime
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
 from .services.slots import get_zone, parse_hhmm
+
+
+def _utc_iso(value: datetime) -> str:
+    return (value.replace(tzinfo=UTC) if value.tzinfo is None else value).isoformat()
+
+
+# Database timestamps are naive UTC; serialise them with an explicit offset.
+UtcDatetime = Annotated[datetime, PlainSerializer(_utc_iso, return_type=str)]
 
 
 class _Out(BaseModel):
@@ -60,8 +68,8 @@ class MeUpdate(BaseModel):
 
 class AdminUserOut(UserOut):
     active: bool
-    created_at: datetime
-    last_seen_at: datetime | None
+    created_at: UtcDatetime
+    last_seen_at: UtcDatetime | None
     team_count: int = 0
 
 
@@ -107,7 +115,7 @@ class MemberOut(BaseModel):
     user: UserOut
     role: str
     on_call: bool
-    joined_at: datetime
+    joined_at: UtcDatetime
 
 
 class TeamOut(_Out):
@@ -390,8 +398,8 @@ class NotificationOut(_Out):
     title: str
     body: str
     link: str
-    created_at: datetime
-    read_at: datetime | None
+    created_at: UtcDatetime
+    read_at: UtcDatetime | None
 
 
 class MarkRead(BaseModel):

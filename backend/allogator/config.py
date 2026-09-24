@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     # Optional comma-separated list of proxy IPs/CIDRs allowed to assert identity headers.
     trusted_proxies: str = ""
     dev_default_user: str = "leader@example.com"
+    # Where the "Sign out" menu item points (e.g. "/oauth2/sign_out" for oauth2-proxy).
+    logout_url: str = ""
 
     # Comma-separated emails that are always global admins.
     admin_emails: str = ""

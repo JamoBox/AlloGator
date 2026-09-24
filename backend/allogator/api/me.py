@@ -217,15 +217,13 @@ def my_todo(db: Session = Depends(get_db), user: User = Depends(get_current_user
             select(AvailabilitySubmission.rota_id).where(AvailabilitySubmission.user_id == user.id)
         )
     )
-    collecting = [
-        r
-        for r in db.scalars(
+    collecting = list(
+        db.scalars(
             select(Rota)
             .where(Rota.team_id.in_(eligible_team_ids), Rota.status == ROTA_COLLECTING)
             .order_by(Rota.start_date)
         )
-        if r.id not in submitted
-    ]
+    )
     open_swaps = list(
         db.scalars(
             select(SwapRequest)
@@ -261,7 +259,8 @@ def my_todo(db: Session = Depends(get_db), user: User = Depends(get_current_user
         )
     )
     return {
-        "dates_needed": [rota_out(db, r, user) for r in collecting],
+        "dates_needed": [rota_out(db, r, user) for r in collecting if r.id not in submitted],
+        "collecting": [rota_out(db, r, user) for r in collecting],
         "my_swap_requests": [swap_out(db, s, user) for s in mine],
         "swap_requests_to_help": [swap_out(db, s, user) for s in others],
         "rotas_in_progress": [rota_out(db, r, user) for r in to_review],

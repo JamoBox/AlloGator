@@ -56,6 +56,13 @@ class ImportError_(ValueError):
 # --------------------------------------------------------------------------------------
 
 
+def _csv_safe(value: str) -> str:
+    """Stop free text being interpreted as a formula when the CSV is opened in a spreadsheet."""
+    if value and value[0] in "=+-@\t\r":
+        return "'" + value
+    return value
+
+
 def _rotas_for_export(team: Team, rotas: list[Rota] | None, published_only: bool) -> list[Rota]:
     rotas = rotas if rotas is not None else sorted(team.rotas, key=lambda r: r.start_date)
     if published_only:
@@ -124,7 +131,7 @@ def export_csv(team: Team, rotas: list[Rota] | None = None, *, published_only: b
                 continue
             w.writerow(
                 {
-                    "rota": r.display_name,
+                    "rota": _csv_safe(r.display_name),
                     "rota_start_date": r.start_date.isoformat(),
                     "period_days": r.period_days,
                     "handover_time": r.handover_time,
@@ -133,8 +140,8 @@ def export_csv(team: Team, rotas: list[Rota] | None = None, *, published_only: b
                     "start": utc_to_local(s.start_at, tz).isoformat(),
                     "end": utc_to_local(s.end_at, tz).isoformat(),
                     "user_email": s.user.email,
-                    "user_name": s.user.display_name,
-                    "note": s.note,
+                    "user_name": _csv_safe(s.user.display_name),
+                    "note": _csv_safe(s.note),
                 }
             )
     return buf.getvalue()

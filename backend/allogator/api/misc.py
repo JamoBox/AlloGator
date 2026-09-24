@@ -35,6 +35,7 @@ def app_config():
         "email_enabled": bool(s.smtp_host),
         "open_team_creation": s.open_team_creation,
         "base_url": s.base_url,
+        "logout_url": s.logout_url,
     }
 
 
