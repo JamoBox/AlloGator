@@ -30,6 +30,11 @@ export function StatsTable({ analysis, showSubmitted }: { analysis: Analysis; sh
               </Tooltip>
             </Table.Th>
             <Table.Th w={180}>Load (recent + this rota)</Table.Th>
+            <Table.Th>
+              <Tooltip label="Holidays & special days: this rota / last 2 years" withArrow>
+                <span>Holidays</span>
+              </Tooltip>
+            </Table.Th>
             <Table.Th>Unavailable</Table.Th>
             {showSubmitted && <Table.Th>Dates in</Table.Th>}
           </Table.Tr>
@@ -57,6 +62,11 @@ export function StatsTable({ analysis, showSubmitted }: { analysis: Analysis; sh
                     <Progress.Section value={(100 * s.days) / max} color={personColor(s.user_id)} />
                   </Tooltip>
                 </Progress.Root>
+              </Table.Td>
+              <Table.Td>
+                <Text size="sm">
+                  {s.holiday_days} / {s.holiday_history}
+                </Text>
               </Table.Td>
               <Table.Td>
                 <Text size="sm">

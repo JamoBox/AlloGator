@@ -16,8 +16,15 @@ import { IconCheck, IconInfoCircle, IconTrash } from '@tabler/icons-react';
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
-import { keys, useAction, useMyShifts, useMyUnavailability, useTodo } from '../api/hooks';
-import type { AvailabilityKind, Rota, Unavailability } from '../api/types';
+import {
+  keys,
+  useAction,
+  useMyShifts,
+  useMySpecialDays,
+  useMyUnavailability,
+  useTodo,
+} from '../api/hooks';
+import type { AvailabilityKind, Rota, Todo, Unavailability } from '../api/types';
 import { AvailabilityCalendar } from '../components/AvailabilityCalendar';
 import { dayjs, eachDay, fmtDateLong, fmtDateRange, fromNow, groupRuns, inTz, ISO } from '../lib/dates';
 
@@ -28,15 +35,37 @@ export function AvailabilityPage() {
   const todo = useTodo();
   const shifts = useMyShifts();
 
+  const specials = useMySpecialDays();
+  const specialDays = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of specials.data ?? []) {
+      const label = s.team_name && (specials.data?.some((x) => x.team_name !== s.team_name) ?? false)
+        ? `${s.label} (${s.team_name})`
+        : s.label;
+      m.set(s.date, m.has(s.date) && m.get(s.date) !== label ? `${m.get(s.date)} · ${label}` : label);
+    }
+    return m;
+  }, [specials.data]);
+
+  // Optimistic: the calendar updates instantly; a failed save rolls back with an error toast.
   const save = useAction(
     (a: { dates: string[]; kind: AvailabilityKind | null; note: string }) =>
       api<Unavailability[]>('/api/me/unavailability', { body: a }),
     {
-      invalidate: [keys.myUnavailability, ['rotas']],
-      success: (_, a) =>
-        a.kind === null
-          ? `Cleared ${a.dates.length} day(s)`
-          : `Marked ${a.dates.length} day(s) as ${a.kind === 'unavailable' ? "can't cover" : 'partly available'}`,
+      optimistic: (a, qc) => {
+        const prev = qc.getQueryData<Unavailability[]>(keys.myUnavailability);
+        if (prev) {
+          const set = new Set(a.dates);
+          const kept = prev.filter((e) => !set.has(e.date));
+          const added = a.kind ? a.dates.map((date) => ({ date, kind: a.kind!, note: a.note })) : [];
+          qc.setQueryData(
+            keys.myUnavailability,
+            [...kept, ...added].sort((x, y) => x.date.localeCompare(y.date)),
+          );
+        }
+        return () => qc.setQueryData(keys.myUnavailability, prev);
+      },
+      invalidate: [['rotas']],
     },
   );
 
@@ -86,9 +115,9 @@ export function AvailabilityPage() {
               entries={entries.data ?? []}
               highlights={highlights}
               onCallDates={onCallDates}
+              specialDays={specialDays}
               initialMonth={focus?.start_date}
-              saving={save.isPending}
-              onApply={(dates, kind, note) => save.mutateAsync({ dates, kind, note })}
+              onApply={(dates, kind, note) => save.mutate({ dates, kind, note })}
             />
           </Card>
         </Grid.Col>
@@ -162,6 +191,18 @@ function groupByKindAndNote(items: Unavailability[]): Unavailability[][] {
 
 function DatesRequestCard({ rota, highlighted }: { rota: Rota; highlighted: boolean }) {
   const submit = useAction(() => api(`/api/rotas/${rota.id}/submit`, { body: { comment: '' } }), {
+    optimistic: (_, qc) => {
+      const prev = qc.getQueryData<Todo>(keys.todo);
+      if (prev)
+        qc.setQueryData<Todo>(keys.todo, {
+          ...prev,
+          collecting: prev.collecting.map((r) =>
+            r.id === rota.id ? { ...r, my_submitted: true, submitted_count: r.submitted_count + 1 } : r,
+          ),
+          dates_needed: prev.dates_needed.filter((r) => r.id !== rota.id),
+        });
+      return () => qc.setQueryData(keys.todo, prev);
+    },
     invalidate: [keys.todo, keys.rota(rota.id), keys.rotas(rota.team_id)],
     success: 'Thanks! Your dates are confirmed. You can still change them until the rota is generated.',
   });

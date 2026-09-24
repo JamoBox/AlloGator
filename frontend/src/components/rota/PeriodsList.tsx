@@ -53,6 +53,13 @@ export function PeriodsList({
             <Text size="sm" fw={600}>
               {fmtDateRange(p.start_date, p.end_date)}
             </Text>
+            {rota.days
+              .filter((d) => d.period_index === p.index && d.holiday)
+              .map((d) => (
+                <Text key={d.date} size="xs" c="grape.7">
+                  🎉 {dayjs(d.date).format('ddd D')}: {d.holiday}
+                </Text>
+              ))}
             <Stack gap={4} mt="xs">
               {rota.shifts_visible ? (
                 <>

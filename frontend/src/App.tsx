@@ -1,23 +1,49 @@
-import { Alert, Center, Loader, Stack, Text } from '@mantine/core';
+import { Alert, Center, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useMe } from './api/hooks';
+import { ChompLoader } from './components/brand';
 import { Layout } from './components/Layout';
-import { AdminPage } from './pages/AdminPage';
-import { AvailabilityPage } from './pages/AvailabilityPage';
-import { Dashboard } from './pages/Dashboard';
-import { ProfilePage } from './pages/ProfilePage';
-import { RotaPage } from './pages/RotaPage';
-import { TeamPage } from './pages/TeamPage';
-import { TeamsPage } from './pages/TeamsPage';
+
+// Pages are split into their own chunks and prefetched while the browser is idle, so the first
+// load is small and later navigation is instant.
+const pages = {
+  Dashboard: () => import('./pages/Dashboard'),
+  AvailabilityPage: () => import('./pages/AvailabilityPage'),
+  TeamsPage: () => import('./pages/TeamsPage'),
+  TeamPage: () => import('./pages/TeamPage'),
+  RotaPage: () => import('./pages/RotaPage'),
+  ProfilePage: () => import('./pages/ProfilePage'),
+  AdminPage: () => import('./pages/AdminPage'),
+};
+const Dashboard = lazy(() => pages.Dashboard().then((m) => ({ default: m.Dashboard })));
+const AvailabilityPage = lazy(() =>
+  pages.AvailabilityPage().then((m) => ({ default: m.AvailabilityPage })),
+);
+const TeamsPage = lazy(() => pages.TeamsPage().then((m) => ({ default: m.TeamsPage })));
+const TeamPage = lazy(() => pages.TeamPage().then((m) => ({ default: m.TeamPage })));
+const RotaPage = lazy(() => pages.RotaPage().then((m) => ({ default: m.RotaPage })));
+const ProfilePage = lazy(() => pages.ProfilePage().then((m) => ({ default: m.ProfilePage })));
+const AdminPage = lazy(() => pages.AdminPage().then((m) => ({ default: m.AdminPage })));
+
+function usePrefetchPages() {
+  useEffect(() => {
+    const idle =
+      (window as unknown as { requestIdleCallback?: (cb: () => void) => number })
+        .requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 800));
+    idle(() => Object.values(pages).forEach((load) => void load()));
+  }, []);
+}
 
 export function App() {
   const me = useMe();
+  usePrefetchPages();
 
   if (me.isLoading) {
     return (
       <Center h="100vh">
-        <Loader />
+        <ChompLoader label="Waking the gator…" />
       </Center>
     );
   }
@@ -41,17 +67,19 @@ export function App() {
 
   return (
     <Layout>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/availability" element={<AvailabilityPage />} />
-        <Route path="/teams" element={<TeamsPage />} />
-        <Route path="/teams/:teamId" element={<TeamPage />} />
-        <Route path="/teams/:teamId/rotas/:rotaId" element={<RotaPage />} />
-        <Route path="/teams/:teamId/:tab" element={<TeamPage />} />
-        <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/admin" element={<AdminPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<ChompLoader />}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/availability" element={<AvailabilityPage />} />
+          <Route path="/teams" element={<TeamsPage />} />
+          <Route path="/teams/:teamId" element={<TeamPage />} />
+          <Route path="/teams/:teamId/rotas/:rotaId" element={<RotaPage />} />
+          <Route path="/teams/:teamId/:tab" element={<TeamPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </Layout>
   );
 }

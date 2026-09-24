@@ -10,5 +10,19 @@ export default defineConfig({
     port: 5173,
     proxy: { '/api': backend, '/ical': backend },
   },
-  build: { chunkSizeWarningLimit: 1500 },
+  build: {
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        // Long-lived vendor chunks: app changes don't invalidate the cached libraries.
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('@tabler')) return 'icons';
+          if (id.includes('@mantine') || id.includes('@floating-ui')) return 'mantine';
+          if (id.includes('dayjs')) return 'dayjs';
+          return 'vendor';
+        },
+      },
+    },
+  },
 });

@@ -12,6 +12,7 @@ import {
   Modal,
   NumberInput,
   Select,
+  Skeleton,
   Stack,
   Stepper,
   Tabs,
@@ -34,7 +35,6 @@ import {
   IconJson,
   IconLockOpen,
   IconMailForward,
-  IconRefresh,
   IconRocket,
   IconSparkles,
   IconTrash,
@@ -60,8 +60,11 @@ import { IssuesPanel } from '../components/rota/IssuesPanel';
 import { PeriodsList } from '../components/rota/PeriodsList';
 import { type BoardActions, RotaBoard } from '../components/rota/RotaBoard';
 import { StatsTable } from '../components/rota/StatsTable';
+import { DecisionHelper } from '../components/rota/DecisionHelper';
+import { ChompLoader, IconChomp } from '../components/brand';
 import { RequestSwapModal } from '../components/team/SwapsTab';
 import { dayjs, fmtDateLong, fmtDateRange, fromNow, inTz, ISO, toLocalInput } from '../lib/dates';
+import { type AssignBody, applyAssign } from '../lib/rota';
 
 const STEP = { planning: 0, collecting: 1, review: 2, published: 4 } as const;
 
@@ -73,14 +76,17 @@ export function RotaPage() {
   const rota = useRota(rotaId);
   const me = useMe();
   const myShifts = useMyShifts();
-  const leader = !!team.data?.is_leader;
+  // Known from /api/me (already loaded), so leader-only data is fetched in parallel.
+  const leader =
+    !!me.data?.is_admin ||
+    !!me.data?.memberships.some((m) => m.team_id === teamId && m.role === 'leader');
   const r = rota.data;
-  const analysis = useAnalysis(rotaId, !!r && (leader || r.status === 'published'));
-  const matrix = useAvailability(rotaId, !!r);
+  const analysis = useAnalysis(rotaId, leader || r?.status === 'published');
+  const matrix = useAvailability(rotaId);
   const [tab, setTab] = useState<string | null>(null);
   const [swapShift, setSwapShift] = useState<ScheduleShift | null>(null);
 
-  if (rota.isLoading || team.isLoading) return <Loader />;
+  if (rota.isLoading || team.isLoading) return <RotaSkeleton />;
   if (!r || !team.data) return <Text c="red">{rota.error?.message ?? 'Rota not found'}</Text>;
 
   const hasSchedule = r.shifts_visible && r.days.some((d) => d.user_ids.some((u) => u != null));
@@ -216,6 +222,17 @@ export function RotaPage() {
   );
 }
 
+function RotaSkeleton() {
+  return (
+    <Stack gap="md">
+      <Skeleton h={14} w={260} />
+      <Skeleton h={34} w={420} />
+      <Skeleton h={70} />
+      <Skeleton h={320} />
+    </Stack>
+  );
+}
+
 function invalidateRota(r: RotaDetail) {
   return [
     keys.rota(r.id),
@@ -295,9 +312,18 @@ function IssueSummary({ analysis, onOpen }: { analysis: Analysis; onOpen: () => 
 }
 
 function useAssign(rota: RotaDetail) {
+  const key = keys.rota(rota.id);
   return useAction(
-    (body: Record<string, unknown>) => api<RotaDetail>(`/api/rotas/${rota.id}/assign`, { body: { lock: true, ...body } }),
-    { invalidate: invalidateRota(rota) },
+    (body: AssignBody) => api<RotaDetail>(`/api/rotas/${rota.id}/assign`, { body: { lock: true, ...body } }),
+    {
+      optimistic: (body, qc) => {
+        const prev = qc.getQueryData<RotaDetail>(key);
+        if (prev) qc.setQueryData(key, applyAssign(prev, body));
+        return () => qc.setQueryData(key, prev);
+      },
+      setData: (result) => [[key, result]],
+      invalidate: invalidateRota(rota).filter((k) => k !== key),
+    },
   );
 }
 
@@ -313,12 +339,25 @@ function BoardWithActions({
   meId?: number;
 }) {
   const assign = useAssign(rota);
+  const key = keys.rota(rota.id);
   const lock = useAction(
-    (a: { ids: number[]; locked: boolean }) =>
-      api(`/api/rotas/${rota.id}/lock`, { body: { shift_ids: a.ids, locked: a.locked } }),
-    { invalidate: [keys.rota(rota.id)] },
+    (a: { ids: number[]; locked: boolean; date: string }) =>
+      api<RotaDetail>(`/api/rotas/${rota.id}/lock`, { body: { shift_ids: a.ids, locked: a.locked } }),
+    {
+      optimistic: (a, qc) => {
+        const prev = qc.getQueryData<RotaDetail>(key);
+        if (prev)
+          qc.setQueryData(key, {
+            ...prev,
+            days: prev.days.map((d) => (d.date === a.date ? { ...d, locked: a.locked } : d)),
+          });
+        return () => qc.setQueryData(key, prev);
+      },
+      setData: (result) => [[key, result]],
+    },
   );
   const [custom, setCustom] = useState<{ userId: number | null; day: Day } | null>(null);
+  const [decide, setDecide] = useState<Day | null>(null);
 
   const actions: BoardActions = {
     assignDay: (userId, date) => assign.mutate({ user_id: userId, from_date: date }),
@@ -328,8 +367,9 @@ function BoardWithActions({
       const ids = rota.shifts
         .filter((s) => dayjs(s.start_at).isBefore(dayjs(day.end_at)) && dayjs(day.start_at).isBefore(dayjs(s.end_at)))
         .map((s) => s.id);
-      lock.mutate({ ids, locked: !day.locked });
+      lock.mutate({ ids, locked: !day.locked, date: day.date });
     },
+    helpDecide: (day) => setDecide(day),
   };
 
   return (
@@ -341,7 +381,25 @@ function BoardWithActions({
             rota={rota}
             userId={custom.userId}
             day={custom.day}
-            onSubmit={(body) => assign.mutateAsync(body).then(() => setCustom(null))}
+            onSubmit={(body) => assign.mutateAsync(body as AssignBody).then(() => setCustom(null))}
+          />
+        )}
+      </Modal>
+      <Modal
+        opened={!!decide}
+        onClose={() => setDecide(null)}
+        size="lg"
+        title={decide ? `Who should take ${dayjs(decide.date).format('ddd D MMM')}${decide.holiday ? ` (${decide.holiday})` : ''}?` : ''}
+      >
+        {decide && (
+          <DecisionHelper
+            rotaId={rota.id}
+            from={decide.date}
+            to={decide.date}
+            onPick={(uid) => {
+              setDecide(null);
+              assign.mutate({ user_id: uid, from_date: decide.date });
+            }}
           />
         )}
       </Modal>
@@ -408,6 +466,7 @@ function IssuesWithActions({ rota, analysis, editable }: { rota: RotaDetail; ana
   });
   return (
     <IssuesPanel
+      rotaId={rota.id}
       analysis={analysis}
       people={rota.people}
       editable={editable}
@@ -462,11 +521,13 @@ function LeaderActions({
     success: (r) => `Reminder sent to ${r.reminded} people`,
     invalidate: inv,
   });
-  const publish = useAction(() => api(`/api/rotas/${rota.id}/publish`, { method: 'POST' }), {
+  const publish = useAction(() => api<RotaDetail>(`/api/rotas/${rota.id}/publish`, { method: 'POST' }), {
+    setData: (r) => [[keys.rota(rota.id), r]],
     invalidate: inv,
     success: 'Published! Everyone has been notified.',
   });
-  const unpublish = useAction(() => api(`/api/rotas/${rota.id}/unpublish`, { method: 'POST' }), {
+  const unpublish = useAction(() => api<RotaDetail>(`/api/rotas/${rota.id}/unpublish`, { method: 'POST' }), {
+    setData: (r) => [[keys.rota(rota.id), r]],
     invalidate: inv,
     success: 'Rota moved back to draft',
   });
@@ -516,7 +577,7 @@ function LeaderActions({
             <Button variant="default" leftSection={<IconBell size={16} />} onClick={() => remind.mutate(undefined)} loading={remind.isPending}>
               Remind ({rota.eligible_count - rota.submitted_count})
             </Button>
-            <Button leftSection={<IconSparkles size={16} />} onClick={generateModal.open}>
+            <Button leftSection={<IconChomp size={16} />} onClick={generateModal.open}>
               Generate rota
             </Button>
           </>
@@ -524,7 +585,7 @@ function LeaderActions({
       case 'review':
         return (
           <>
-            <Button variant="default" leftSection={<IconRefresh size={16} />} onClick={generateModal.open}>
+            <Button variant="default" leftSection={<IconChomp size={16} />} onClick={generateModal.open}>
               {hasSchedule ? 'Regenerate' : 'Generate'}
             </Button>
             <Button leftSection={<IconRocket size={16} />} onClick={confirmPublish} disabled={!hasSchedule} loading={publish.isPending}>
@@ -698,13 +759,31 @@ function GenerateForm({
   const [keepLocked, setKeepLocked] = useState(true);
   const missing = rota.eligible_count - rota.submitted_count;
   const gen = useAction(
-    () => api(`/api/rotas/${rota.id}/generate`, { body: { keep_locked: keepLocked } }),
+    () =>
+      api<{ rota: RotaDetail; analysis: Analysis }>(`/api/rotas/${rota.id}/generate`, {
+        body: { keep_locked: keepLocked },
+      }),
     {
-      invalidate: invalidateRota(rota),
-      success: hasSchedule ? 'New rota generated' : 'Rota generated — review it before publishing',
+      setData: (res) => [
+        [keys.rota(rota.id), res.rota],
+        [keys.analysis(rota.id), res.analysis],
+      ],
+      invalidate: invalidateRota(rota).filter(
+        (k) => k !== keys.rota(rota.id) && k !== keys.analysis(rota.id),
+      ),
+      success: (res) => {
+        const secs = res.analysis.solver?.seconds;
+        const issues = res.analysis.summary.errors + res.analysis.summary.warnings;
+        return `Snap! 🐊 ${hasSchedule ? 'New rota' : 'Rota'} ready${secs ? ` in ${secs.toFixed(1)}s` : ''}${
+          issues ? ` — ${issues} thing${issues > 1 ? 's' : ''} to check` : ' — no issues'
+        }.`;
+      },
       onSuccess: onDone,
     },
   );
+  if (gen.isPending) {
+    return <ChompLoader size={96} label="Chomping through every possible rota…" />;
+  }
   return (
     <Stack>
       <Text size="sm">
@@ -731,8 +810,8 @@ function GenerateForm({
         />
       )}
       <Group justify="flex-end">
-        <Button leftSection={<IconSparkles size={16} />} onClick={() => gen.mutate(undefined)} loading={gen.isPending}>
-          {gen.isPending ? 'Thinking…' : hasSchedule ? 'Regenerate' : 'Generate'}
+        <Button leftSection={<IconChomp size={16} />} onClick={() => gen.mutate(undefined)} data-autofocus>
+          {hasSchedule ? 'Regenerate' : 'Generate'}
         </Button>
       </Group>
     </Stack>

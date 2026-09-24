@@ -9,6 +9,8 @@
   --ag-grid-line: var(--mantine-color-gray-3);
   --ag-weekend: var(--mantine-color-gray-0);
   --ag-selected: var(--mantine-color-blue-6);
+  --ag-holiday: var(--mantine-color-grape-0);
+  --ag-holiday-strong: var(--mantine-color-grape-5);
 }
 
 /* light-dark() can't be used for custom properties on :root (the colour-scheme attribute
@@ -21,6 +23,8 @@
   --ag-grid-line: var(--mantine-color-dark-4);
   --ag-weekend: var(--mantine-color-dark-6);
   --ag-selected: var(--mantine-color-blue-4);
+  --ag-holiday: rgba(190, 75, 219, 0.18);
+  --ag-holiday-strong: var(--mantine-color-grape-4);
 }
 
 /* ---- Availability month calendar ---- */
@@ -74,6 +78,15 @@
 .ag-day[data-in-rota] {
   border-color: var(--mantine-color-gator-5);
   border-width: 2px;
+}
+.ag-day[data-special]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 3px;
+  background: var(--ag-holiday-strong);
 }
 .ag-day[data-kind='unavailable'] {
   background: var(--ag-unavailable);
@@ -206,4 +219,94 @@
   border-radius: 3px;
   display: inline-block;
   border: 1px solid var(--ag-grid-line);
+}
+
+/* ---- The croc ---- */
+.croc .croc-upper,
+.croc .croc-lower {
+  transform-box: view-box;
+  transform-origin: 14px 41px;
+  transition: transform 110ms cubic-bezier(0.3, 1.6, 0.6, 1);
+}
+.croc[data-chomping] .croc-upper {
+  animation: croc-chomp-upper 0.46s ease-in-out infinite;
+}
+.croc[data-chomping] .croc-lower {
+  animation: croc-chomp-lower 0.46s ease-in-out infinite;
+}
+.croc[data-sleepy] .croc-upper,
+.ag-logo:hover .croc-upper {
+  transform: rotate(9deg);
+}
+.croc[data-sleepy] .croc-lower,
+.ag-logo:hover .croc-lower {
+  transform: rotate(-4deg);
+}
+@keyframes croc-chomp-upper {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(9deg); }
+}
+@keyframes croc-chomp-lower {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-4deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .croc[data-chomping] .croc-upper,
+  .croc[data-chomping] .croc-lower {
+    animation: none;
+  }
+}
+
+/* ---- Board extras ---- */
+.ag-tip {
+  position: fixed;
+  z-index: 400;
+  transform: translate(-50%, calc(-100% - 8px));
+  pointer-events: none;
+  white-space: pre-line;
+  background: var(--mantine-color-dark-6);
+  color: var(--mantine-color-white);
+  font-size: var(--mantine-font-size-xs);
+  line-height: 1.35;
+  padding: 5px 9px;
+  border-radius: var(--mantine-radius-sm);
+  box-shadow: var(--mantine-shadow-md);
+  max-width: 280px;
+}
+.ag-board thead th[data-weekend] {
+  background: var(--ag-weekend);
+}
+.ag-board thead th[data-holiday] {
+  background: var(--ag-holiday);
+  box-shadow: inset 0 3px 0 var(--ag-holiday-strong);
+  cursor: help;
+}
+.ag-holiday-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+  background: var(--ag-holiday);
+  box-shadow: inset 0 3px 0 var(--ag-holiday-strong);
+}
+.ag-pin {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: white;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.ag-note-dot {
+  background: var(--mantine-color-dimmed);
+  position: absolute;
+  top: 3px;
+  right: 3px;
+}
+.ag-check {
+  color: var(--mantine-color-gator-6);
+  font-size: 11px;
+  font-weight: 700;
 }

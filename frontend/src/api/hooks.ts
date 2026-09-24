@@ -1,5 +1,6 @@
 import { notifications } from '@mantine/notifications';
 import {
+  type QueryClient,
   type QueryKey,
   useMutation,
   useQuery,
@@ -7,6 +8,9 @@ import {
 } from '@tanstack/react-query';
 import { api } from './client';
 import type {
+  HolidayCountry,
+  Hints,
+  SpecialDay,
   AdminUser,
   Analysis,
   AppConfig,
@@ -48,6 +52,10 @@ export const keys = {
   unread: ['notifications', 'unread'] as const,
   adminUsers: ['admin', 'users'] as const,
   devUsers: ['dev', 'users'] as const,
+  mySpecialDays: ['me', 'special-days'] as const,
+  specialDays: (teamId: number) => ['teams', teamId, 'special-days'] as const,
+  countries: ['holiday-countries'] as const,
+  hints: (rotaId: number, from: string, to: string) => ['rotas', rotaId, 'hints', from, to] as const,
 };
 
 export const useConfig = () =>
@@ -153,6 +161,35 @@ export const useAdminUsers = (enabled = true) =>
 export const useDevUsers = (enabled: boolean) =>
   useQuery({ queryKey: keys.devUsers, queryFn: () => api<User[]>('/api/dev/users'), enabled });
 
+export const useMySpecialDays = () =>
+  useQuery({
+    queryKey: keys.mySpecialDays,
+    queryFn: () => api<SpecialDay[]>('/api/me/special-days'),
+    staleTime: 10 * 60_000,
+  });
+
+export const useSpecialDays = (teamId: number) =>
+  useQuery({
+    queryKey: keys.specialDays(teamId),
+    queryFn: () => api<SpecialDay[]>(`/api/teams/${teamId}/special-days`),
+  });
+
+export const useHolidayCountries = (enabled = true) =>
+  useQuery({
+    queryKey: keys.countries,
+    queryFn: () => api<HolidayCountry[]>('/api/holidays/countries'),
+    staleTime: Infinity,
+    enabled,
+  });
+
+export const useHints = (rotaId: number, from: string, to: string, enabled = true) =>
+  useQuery({
+    queryKey: keys.hints(rotaId, from, to),
+    queryFn: () => api<Hints>(`/api/rotas/${rotaId}/hints?from=${from}&to=${to}`),
+    enabled,
+    staleTime: 30_000,
+  });
+
 /**
  * Mutation helper: runs ``fn``, shows a toast on error (and optionally on success), and
  * invalidates the given query keys (prefix match).
@@ -163,21 +200,62 @@ export function useAction<TArgs, TResult>(
     invalidate?: QueryKey[] | ((result: TResult, args: TArgs) => QueryKey[]);
     success?: string | ((result: TResult, args: TArgs) => string | null);
     onSuccess?: (result: TResult, args: TArgs) => void;
+    /** Update caches before the request; the returned function undoes it on failure. */
+    optimistic?: (args: TArgs, qc: QueryClient) => (() => void) | void;
+    /** Write the response straight into caches (skips a refetch round trip). */
+    setData?: (result: TResult, args: TArgs) => [QueryKey, unknown][];
   } = {},
 ) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
+    onMutate: async (args: TArgs) => {
+      if (!opts.optimistic) return undefined;
+      return { rollback: opts.optimistic(args, qc) ?? undefined };
+    },
     onSuccess: async (result, args) => {
+      for (const [key, data] of opts.setData?.(result, args) ?? []) qc.setQueryData(key, data);
       const inv =
         typeof opts.invalidate === 'function' ? opts.invalidate(result, args) : opts.invalidate;
-      await Promise.all((inv ?? []).map((k) => qc.invalidateQueries({ queryKey: k })));
+      // Refresh in the background: the UI already reflects the change.
+      for (const k of inv ?? []) void qc.invalidateQueries({ queryKey: k });
       const msg = typeof opts.success === 'function' ? opts.success(result, args) : opts.success;
       if (msg) notifications.show({ message: msg, color: 'green' });
       opts.onSuccess?.(result, args);
     },
-    onError: (err: Error) => {
+    onError: (err: Error, _args, context) => {
+      context?.rollback?.();
       notifications.show({ title: 'Something went wrong', message: err.message, color: 'red' });
     },
   });
+}
+
+/** Warm the cache for a page before the user clicks through to it. */
+export function usePrefetch() {
+  const qc = useQueryClient();
+  const opts = { staleTime: 15_000 };
+  return {
+    rota: (id: number, leader: boolean) => {
+      void qc.prefetchQuery({ queryKey: keys.rota(id), queryFn: () => api(`/api/rotas/${id}`), ...opts });
+      void qc.prefetchQuery({
+        queryKey: keys.availability(id),
+        queryFn: () => api(`/api/rotas/${id}/availability`),
+        ...opts,
+      });
+      if (leader)
+        void qc.prefetchQuery({
+          queryKey: keys.analysis(id),
+          queryFn: () => api(`/api/rotas/${id}/analysis`),
+          ...opts,
+        });
+    },
+    team: (id: number) => {
+      void qc.prefetchQuery({ queryKey: keys.team(id), queryFn: () => api(`/api/teams/${id}`), ...opts });
+      void qc.prefetchQuery({
+        queryKey: keys.schedule(id),
+        queryFn: () => api(`/api/teams/${id}/schedule`),
+        ...opts,
+      });
+    },
+  };
 }

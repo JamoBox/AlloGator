@@ -3,7 +3,6 @@ import {
   Badge,
   Button,
   Card,
-  EmptyState,
   Grid,
   Group,
   Loader,
@@ -17,13 +16,12 @@ import {
   IconArrowsExchange,
   IconCalendarOff,
   IconClipboardList,
-  IconMoodSmile,
   IconPhoneCall,
-  IconUsersGroup,
 } from '@tabler/icons-react';
 import { Link } from 'react-router-dom';
-import { useMe, useMyShifts, useTodo } from '../api/hooks';
+import { useMe, useMyShifts, usePrefetch, useTodo } from '../api/hooks';
 import type { ScheduleShift } from '../api/types';
+import { CrocEmpty } from '../components/brand';
 import { CalendarButton, RotaStatusBadge, SectionTitle } from '../components/common';
 import { dayjs, fmtDateLong, fmtDateRange, fmtDateTime, fromNow } from '../lib/dates';
 
@@ -31,6 +29,7 @@ export function Dashboard() {
   const me = useMe();
   const shifts = useMyShifts();
   const todo = useTodo();
+  const prefetch = usePrefetch();
 
   if (!me.data) return <Loader />;
   const first = me.data.name.split(' ')[0];
@@ -40,8 +39,7 @@ export function Dashboard() {
       <Stack>
         <Title order={2}>Welcome, {first}</Title>
         <Card p="xl">
-          <EmptyState
-            icon={<IconUsersGroup size={32} />}
+          <CrocEmpty
             title="You're not in an on-call team yet"
             description="Ask a team leader to add you by email, or create a team if you're setting up a new rota."
           >
@@ -50,7 +48,7 @@ export function Dashboard() {
                 Create a team
               </Button>
             )}
-          </EmptyState>
+          </CrocEmpty>
         </Card>
       </Stack>
     );
@@ -85,12 +83,7 @@ export function Dashboard() {
             <SectionTitle>Needs your attention</SectionTitle>
             {todo.isLoading && <Loader size="sm" />}
             {t && attention === 0 && (
-              <Group gap="xs">
-                <ThemeIcon variant="light" radius="xl">
-                  <IconMoodSmile size={18} />
-                </ThemeIcon>
-                <Text c="dimmed">All caught up.</Text>
-              </Group>
+              <CrocEmpty sleepy size={64} title="All caught up" description="Nothing needs you right now — the gator's having a nap." />
             )}
             <Stack gap="xs">
               {t?.dates_needed.map((r) => (
@@ -134,6 +127,7 @@ export function Dashboard() {
               {t?.rotas_in_progress.map((r) => (
                 <TodoRow
                   key={`r${r.id}`}
+                  onHover={() => prefetch.rota(r.id, true)}
                   icon={<IconClipboardList size={16} />}
                   color="orange"
                   to={`/teams/${r.team_id}/rotas/${r.id}`}
@@ -270,6 +264,7 @@ function TodoRow({
   detail,
   action,
   badge,
+  onHover,
 }: {
   icon: React.ReactNode;
   color: string;
@@ -278,9 +273,10 @@ function TodoRow({
   detail: string;
   action: string;
   badge?: React.ReactNode;
+  onHover?: () => void;
 }) {
   return (
-    <Group justify="space-between" wrap="nowrap">
+    <Group justify="space-between" wrap="nowrap" onMouseEnter={onHover}>
       <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
         <ThemeIcon variant="light" color={color} radius="xl">
           {icon}
@@ -297,7 +293,7 @@ function TodoRow({
           </Text>
         </div>
       </Group>
-      <Button component={Link} to={to} size="xs" variant="light" color={color}>
+      <Button component={Link} to={to} size="xs" variant="light" color={color} style={{ flexShrink: 0 }}>
         {action}
       </Button>
     </Group>

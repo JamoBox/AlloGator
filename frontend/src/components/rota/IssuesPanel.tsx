@@ -1,12 +1,9 @@
 import { Alert, Badge, Button, Group, Stack, Text } from '@mantine/core';
-import {
-  IconAlertCircle,
-  IconAlertTriangle,
-  IconCircleCheck,
-  IconInfoCircle,
-} from '@tabler/icons-react';
+import { IconAlertCircle, IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
 import type { Analysis, Candidate, Issue, User } from '../../api/types';
 import { fmtDate } from '../../lib/dates';
+import { CrocEmpty } from '../brand';
+import { DecisionHelper } from './DecisionHelper';
 
 const ICON = {
   error: <IconAlertCircle size={18} />,
@@ -22,11 +19,13 @@ export interface IssueActions {
 }
 
 export function IssuesPanel({
+  rotaId,
   analysis,
   people,
   editable,
   actions,
 }: {
+  rotaId: number;
   analysis: Analysis;
   people: User[];
   editable: boolean;
@@ -35,10 +34,11 @@ export function IssuesPanel({
   const name = (id: number) => people.find((p) => p.id === id)?.name ?? `#${id}`;
   if (analysis.issues.length === 0) {
     return (
-      <Alert color="gator" icon={<IconCircleCheck size={18} />} title="No issues">
-        Everyone is covered, nobody is scheduled when they said they can't be, and there's no
-        partial cover.
-      </Alert>
+      <CrocEmpty
+        sleepy
+        title="Nothing to chew on"
+        description="Everyone is covered, nobody is scheduled when they said they can't be, and there's no partial cover."
+      />
     );
   }
   const order = { error: 0, warning: 1, info: 2 };
@@ -61,6 +61,19 @@ export function IssuesPanel({
                 whole period.
               </Text>
             )}
+            {editable &&
+              actions &&
+              (issue.type === 'uncovered' || issue.type === 'conflict') &&
+              issue.start_date &&
+              issue.end_date && (
+                <DecisionHelper
+                  rotaId={rotaId}
+                  from={issue.start_date}
+                  to={issue.end_date}
+                  compact
+                  onPick={(uid) => actions.assignDates(uid, issue.start_date!, issue.end_date!)}
+                />
+              )}
             {editable && actions && <IssueFixes issue={issue} name={name} actions={actions} />}
             {!editable && issue.candidates && issue.candidates.length > 0 && (
               <CandidateNotes candidates={issue.candidates} name={name} />
@@ -102,31 +115,6 @@ function IssueFixes({
           </Button>
         ))}
       </Group>
-    );
-  }
-  if ((issue.type === 'uncovered' || issue.type === 'conflict') && issue.start_date && issue.end_date) {
-    const usable = cands.filter((c) => c.status !== 'some_days');
-    return (
-      <Stack gap={4}>
-        {usable.length > 0 && (
-          <Group gap="xs">
-            <Text size="xs">Assign to:</Text>
-            {usable.map((c) => (
-              <Button
-                key={c.user_id}
-                size="compact-xs"
-                variant="light"
-                color={c.status === 'available' ? 'gator' : 'orange'}
-                onClick={() => actions.assignDates(c.user_id, issue.start_date!, issue.end_date!)}
-              >
-                {name(c.user_id)}
-                {c.status === 'limited' ? ' (partly available)' : ''}
-              </Button>
-            ))}
-          </Group>
-        )}
-        <CandidateNotes candidates={cands} name={name} />
-      </Stack>
     );
   }
   return null;

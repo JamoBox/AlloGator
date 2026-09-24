@@ -43,6 +43,8 @@ export interface Team {
   default_handover_time: string;
   avoid_back_to_back: boolean;
   fairness_lookback_days: number;
+  holiday_country: string;
+  holiday_subdivision: string;
   my_role: 'leader' | 'member' | null;
   is_leader: boolean;
   member_count: number;
@@ -105,6 +107,7 @@ export interface Day {
   user_ids: (number | null)[];
   majority: number | null;
   locked: boolean;
+  holiday: string | null;
 }
 
 export interface Shift {
@@ -206,6 +209,8 @@ export interface PersonStats {
   unavailable_days: number;
   partial_days: number;
   history_days: number;
+  holiday_days: number;
+  holiday_history: number;
   submitted: boolean;
 }
 
@@ -333,4 +338,42 @@ export interface RotaDefaults {
   num_periods: number;
   period_days: number;
   handover_time: string;
+}
+
+export interface SpecialDay {
+  id: number | null;
+  date: string;
+  label: string;
+  source: 'public' | 'custom';
+  team_id: number | null;
+  team_name: string | null;
+}
+
+export interface HolidayCountry {
+  code: string;
+  name: string;
+  subdivisions: { code: string; name: string }[];
+}
+
+export interface HintItem {
+  tone: 'good' | 'bad' | 'neutral';
+  text: string;
+  kind: string;
+}
+
+export interface HintCandidate {
+  user_id: number;
+  name: string;
+  score: number;
+  availability: 'free' | 'partial' | 'unavailable';
+  suggested: boolean;
+  hints: HintItem[];
+  why: string[];
+}
+
+export interface Hints {
+  dates: string[];
+  labels: Record<string, string>;
+  everyone_unavailable: boolean;
+  candidates: HintCandidate[];
 }

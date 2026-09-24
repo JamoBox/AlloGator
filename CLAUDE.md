@@ -23,3 +23,8 @@ See README.md for the product overview.
 - Emails go through `services/notify.Notifier`; call `notifier.flush()` after `db.commit()`.
 - Frontend data access goes through `src/api/hooks.ts` (React Query); mutations use `useAction`
   with explicit cache invalidation.
+- Keep the UI snappy: frequent edits should be optimistic (`useAction({ optimistic, setData })`
+  in `src/api/hooks.ts`); the rota board must stay a memoised plain table with delegated
+  handlers (no per-cell Mantine Tooltip/Menu). Measure interactions before and after changes.
+- The solver is period-first (`services/solver.py`): owners per period, cover variables only on
+  days an owner is unavailable. Keep new objective terms linear where possible.

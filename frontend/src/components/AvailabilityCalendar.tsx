@@ -4,12 +4,12 @@ import {
   Alert,
   Button,
   Group,
+  Kbd,
   Paper,
   SimpleGrid,
   Stack,
   Text,
   TextInput,
-  Tooltip,
   Transition,
 } from '@mantine/core';
 import {
@@ -26,6 +26,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AvailabilityKind, Unavailability } from '../api/types';
 import { dayjs, eachDay, fmtDate, fmtDateRange, groupRuns, ISO } from '../lib/dates';
+import { HoverTip, useHoverTip } from './HoverTip';
 
 export interface HighlightRange {
   start: string;
@@ -37,10 +38,11 @@ interface Props {
   entries: Unavailability[];
   highlights?: HighlightRange[];
   onCallDates?: Set<string>;
+  specialDays?: Map<string, string>;
   initialMonth?: string;
   months?: number;
   saving?: boolean;
-  onApply: (dates: string[], kind: AvailabilityKind | null, note: string) => Promise<unknown>;
+  onApply: (dates: string[], kind: AvailabilityKind | null, note: string) => unknown;
 }
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -49,6 +51,7 @@ export function AvailabilityCalendar({
   entries,
   highlights = [],
   onCallDates,
+  specialDays,
   initialMonth,
   months = 3,
   saving,
@@ -64,6 +67,7 @@ export function AvailabilityCalendar({
   const drag = useRef<{ anchor: string; base: Set<string> } | null>(null);
   const lastAnchor = useRef<string | null>(null);
   const today = dayjs().format(ISO);
+  const hoverTip = useHoverTip();
 
   const byDate = useMemo(() => new Map(entries.map((e) => [e.date, e])), [entries]);
   const inRota = useMemo(() => {
@@ -130,10 +134,37 @@ export function AvailabilityCalendar({
   const selectedOnCall = onCallDates ? sel.filter((d) => onCallDates.has(d)) : [];
   const anyMarked = sel.some((d) => byDate.has(d));
 
-  const apply = async (kind: AvailabilityKind | null) => {
-    await onApply(sel, kind, kind ? note : '');
+  // Optimistic: the parent updates its cache immediately, so we clear the selection at once.
+  const apply = (kind: AvailabilityKind | null) => {
+    if (!sel.length) return;
+    onApply(sel, kind, kind ? note : '');
     setSelected(new Set());
   };
+  const applyRef = useRef(apply);
+  applyRef.current = apply;
+
+  // Keyboard shortcuts while days are selected: U = can't cover, P = partly, ⌫ = clear.
+  const hasSelection = sel.length > 0;
+  useEffect(() => {
+    if (!hasSelection) return;
+    const onKey = (e: KeyboardEvent) => {
+      const typing = (e.target as HTMLElement)?.closest('input, textarea, [contenteditable]');
+      if (e.key === 'Escape') {
+        (e.target as HTMLElement)?.blur?.();
+        setSelected(new Set());
+        return;
+      }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 'u' || k === 'x') applyRef.current('unavailable');
+      else if (k === 'p') applyRef.current('partial');
+      else if (k === 'backspace' || k === 'delete') applyRef.current(null);
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [hasSelection]);
 
   const monthsToShow = Array.from({ length: months }, (_, i) => month.add(i, 'month'));
 
@@ -163,6 +194,9 @@ export function AvailabilityCalendar({
         spacing="lg"
         className="ag-month"
         onPointerMove={onPointerMove}
+        onMouseOver={hoverTip.onMouseOver}
+        onMouseLeave={hoverTip.onMouseLeave}
+        onPointerDown={hoverTip.hide}
       >
         {monthsToShow.map((m) => (
           <MonthGrid
@@ -172,6 +206,7 @@ export function AvailabilityCalendar({
             byDate={byDate}
             inRota={inRota}
             onCallDates={onCallDates}
+            specialDays={specialDays}
             selected={selected}
             onPointerDown={begin}
             onPointerEnter={extend}
@@ -179,8 +214,9 @@ export function AvailabilityCalendar({
         ))}
       </SimpleGrid>
 
+      <HoverTip ref={hoverTip.ref} />
       <Affix position={{ bottom: 16, left: 0, right: 0 }} zIndex={150}>
-        <Transition transition="slide-up" mounted={sel.length > 0}>
+        <Transition transition="slide-up" mounted={sel.length > 0} duration={120} exitDuration={80}>
           {(styles) => (
             <Paper
               shadow="lg"
@@ -223,6 +259,7 @@ export function AvailabilityCalendar({
                   <Button
                     color="red"
                     leftSection={<IconBan size={16} />}
+                    rightSection={<Kbd size="xs">U</Kbd>}
                     loading={saving}
                     onClick={() => apply('unavailable')}
                   >
@@ -232,6 +269,7 @@ export function AvailabilityCalendar({
                     color="orange"
                     variant="light"
                     leftSection={<IconClockHour4 size={16} />}
+                    rightSection={<Kbd size="xs">P</Kbd>}
                     loading={saving}
                     onClick={() => apply('partial')}
                   >
@@ -241,6 +279,7 @@ export function AvailabilityCalendar({
                     <Button
                       variant="default"
                       leftSection={<IconEraser size={16} />}
+                      rightSection={<Kbd size="xs">⌫</Kbd>}
                       loading={saving}
                       onClick={() => apply(null)}
                     >
@@ -263,6 +302,7 @@ function MonthGrid({
   byDate,
   inRota,
   onCallDates,
+  specialDays,
   selected,
   onPointerDown,
   onPointerEnter,
@@ -272,6 +312,7 @@ function MonthGrid({
   byDate: Map<string, Unavailability>;
   inRota: Map<string, string>;
   onCallDates?: Set<string>;
+  specialDays?: Map<string, string>;
   selected: Set<string>;
   onPointerDown: (date: string, e: React.PointerEvent) => void;
   onPointerEnter: (date: string) => void;
@@ -300,12 +341,14 @@ function MonthGrid({
           const entry = byDate.get(date);
           const d = dayjs(date);
           const rota = inRota.get(date);
+          const special = specialDays?.get(date);
           const onCall = onCallDates?.has(date);
           const tip = [
             entry
               ? `${entry.kind === 'unavailable' ? "Can't cover" : 'Partly available'}${entry.note ? `: ${entry.note}` : ''}`
               : null,
             onCall ? "You're on call" : null,
+            special ? `🎉 ${special}` : null,
             rota ? `Dates requested: ${rota}` : null,
           ]
             .filter(Boolean)
@@ -321,11 +364,13 @@ function MonthGrid({
               data-weekend={d.day() === 0 || d.day() === 6 || undefined}
               data-past={date < today || undefined}
               data-in-rota={rota ? true : undefined}
+              data-special={special ? true : undefined}
               onPointerDown={(e) => onPointerDown(date, e)}
               onPointerEnter={() => onPointerEnter(date)}
               role="button"
               aria-pressed={selected.has(date)}
               aria-label={`${d.format('dddd D MMMM')}${tip ? `. ${tip}` : ''}`}
+              data-tip={tip || undefined}
             >
               <span className="ag-day-num">{d.date()}</span>
               <span className="ag-day-flags">
@@ -334,13 +379,7 @@ function MonthGrid({
               </span>
             </div>
           );
-          return tip ? (
-            <Tooltip key={date} label={tip} openDelay={350} withArrow multiline maw={260}>
-              {cell}
-            </Tooltip>
-          ) : (
-            cell
-          );
+          return cell;
         })}
       </div>
     </div>

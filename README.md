@@ -1,8 +1,11 @@
-# 🐊 AlloGator
+<p align="center"><img src="docs/logo.svg" width="120" alt="AlloGator croc"></p>
 
-**Fair on-call rotas without the spreadsheet.** AlloGator collects everyone's availability,
-generates an optimal on-call schedule, lets leaders review and adjust it, publishes it to
-everyone's calendar, and handles swaps afterwards — all from a web UI.
+# AlloGator
+
+**Snappy, fair on-call rotas without the spreadsheet.** AlloGator collects everyone's
+availability, snaps out an optimal on-call schedule in about a second, helps leaders decide the
+days nobody can do using the team's history, publishes to everyone's calendar, and handles swaps
+afterwards — all from a web UI.
 
 ![Rota board](docs/screenshots/rota-board.png)
 
@@ -18,8 +21,9 @@ everyone's calendar, and handles swaps afterwards — all from a web UI.
 4. **Generate** — the solver finds the best schedule for the whole period (see below). The
    leader sees everyone's availability and the schedule on one board, with any problems flagged:
    days nobody can cover, periods that need partial cover, people scheduled on days they marked,
-   back-to-back periods, and who hasn't submitted yet. Each issue lists who could help, with
-   one-click fixes.
+   back-to-back periods, and who hasn't submitted yet. Each issue comes with one-click fixes.
+   For days **nobody can do** (Christmas, say), AlloGator suggests who should take it using the
+   team's history — see [Deciding the unpopular days](#deciding-the-unpopular-days).
 5. **Adjust** — click any cell to reassign a day, a whole period or a custom time range, or
    leave a day deliberately uncovered. Manual changes are *pinned*, so regenerating keeps them.
 6. **Publish** — everyone is notified with a summary of their shifts and can download them as
@@ -35,6 +39,34 @@ everyone's calendar, and handles swaps afterwards — all from a web UI.
 | **Swaps** | **Your dashboard** |
 | ![Swaps](docs/screenshots/swaps.png) | ![Dashboard](docs/screenshots/dashboard.png) |
 
+## Deciding the unpopular days
+
+Some days are always hard to fill: public holidays, peak trading days, the day of the company
+offsite. When nobody can (or wants to) cover a day, the leader gets a **Who should take it?**
+panel — from the issue, or from *Help me decide…* on the board — that ranks everyone using the
+team's on-call history and explains why:
+
+![Help me decide](docs/screenshots/help-me-decide.png)
+
+Hints include:
+
+- **Holiday history** — "Covered Christmas Day last year (2025)", "Last covered Boxing Day in
+  2022 (4 years ago)", "No record of covering Christmas Day in the last 5 years", and how many
+  holidays/special days each person has done in the last two years versus the team average.
+- **Extra shifts** — "Already covered 5 extra days for teammates in the last 12 months" (days
+  covering someone else's period, including swaps), plus swaps taken for others.
+- **Overall load** — "7 more on-call days than the team average in the last 12 months", weekend
+  load, and how many days they already have in this rota.
+- **The shape of the rota** — "Christmas Day falls in their own on-call period — no extra
+  handovers", "On call right before — would make a 9-day run", "Only just finished a shift".
+- **What they said** — their availability note for the day ("Could maybe do the evening").
+
+The suggestion is simply the lowest score across these; the leader always makes the call with
+one click. Teams choose their public-holiday calendar (any country/region supported by the
+[`holidays`](https://pypi.org/project/holidays/) package) and can add their own special days in
+[team settings](docs/screenshots/holidays.png). Holidays are marked on the board and on everyone's availability calendar, and the
+scheduler also shares them out fairly over time on its own.
+
 ## The scheduler
 
 Rotas are solved as an optimisation problem with [OR-Tools CP-SAT](https://developers.google.com/optimization).
@@ -49,12 +81,31 @@ In priority order, the solver:
 3. **Avoids days people marked as partly available**, and flags any it does use.
 4. **Shares the load fairly**, counting on-call already done in the team's recent rotas (the
    look-back window is configurable; newcomers aren't penalised for having no history).
-5. **Avoids back-to-back periods** for the same person, including across rotas.
-6. **Breaks ties randomly**, so *Regenerate* can offer a different, equally good arrangement.
+5. **Shares out holidays and special days fairly over time**, counting the ones each person
+   covered in the last two years.
+6. **Avoids back-to-back periods** for the same person, including across rotas.
+7. **Breaks ties randomly**, so *Regenerate* can offer a different, equally good arrangement.
 
 Days marked *can't cover* are never assigned by the solver (only a leader can override that
-manually). The search stops once the best schedule has stopped improving for a couple of seconds,
-so generating typically takes 2–5 seconds.
+manually). The model is *period-first*: each period gets an owner who covers every day they're
+free, and cover variables only exist for days an owner can't do — which keeps it small. The search
+stops once the best schedule has stopped meaningfully improving for a second: a typical team's
+8–12 week rota takes about 1–1.5 s end to end (6 people × 8 weeks is proven optimal in ~0.5 s;
+20 people × 26 weeks takes ~2 s).
+
+## Snappy by design
+
+AlloGator is meant to feel instant:
+
+- **Optimistic updates** — marking availability, reassigning days on the board, pinning,
+  confirming dates and reading notifications update the screen immediately (~30 ms), then sync.
+- **A lightweight board** — the people × days grid is a memoised table where only changed rows
+  re-render; one shared menu and tooltip serve every cell.
+- **Small, cached downloads** — pages are code-split and prefetched while idle; responses are
+  gzipped and hashed assets are cached forever (~270 KB of JS on first load).
+- **Prefetch on hover** — rotas and teams start loading before you click.
+- **Keyboard shortcuts** on the availability calendar: select days, then <kbd>U</kbd> can't
+  cover, <kbd>P</kbd> partly available, <kbd>⌫</kbd> clear, <kbd>Esc</kbd> deselect.
 
 ## Quick start (local, no sign-in)
 
@@ -63,7 +114,7 @@ Requires Python 3.11+ and Node 20+.
 ```bash
 make install          # backend venv + frontend packages
 make build            # build the web UI (served by the backend)
-make demo             # optional: a demo team with people, availability, a rota and a swap
+make demo             # optional: demo team with history, holidays, a rota to plan and a swap
 cd backend && ALLOGATOR_AUTH_MODE=dev .venv/bin/allogator serve
 ```
 
@@ -123,7 +174,8 @@ All settings are environment variables (or a `.env` file in the working director
 | `ALLOGATOR_SMTP_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` / `_FROM` | *(none)* / `587` | Outgoing email. Without a host, emails are logged (and visible in dev mode) |
 | `ALLOGATOR_SMTP_STARTTLS` / `ALLOGATOR_SMTP_SSL` | `true` / `false` | SMTP transport security |
 | `ALLOGATOR_SOLVER_TIME_LIMIT_SECONDS` | `20` | Hard cap on schedule generation |
-| `ALLOGATOR_SOLVER_STALL_SECONDS` | `2` | Stop once the best schedule hasn't improved for this long |
+| `ALLOGATOR_SOLVER_STALL_SECONDS` | `1` | Stop once the best schedule hasn't improved for this long |
+| `ALLOGATOR_SOLVER_WORKERS` | CPU count (max 8) | Parallel search workers |
 | `ALLOGATOR_AUTO_MIGRATE` | `true` | Apply database migrations at startup (or run `allogator migrate`) |
 
 Other commands: `allogator migrate`, `allogator seed-demo`, `allogator make-admin EMAIL`.
@@ -166,6 +218,9 @@ backend/                 FastAPI + SQLAlchemy (Python)
       solver.py          CP-SAT rota optimiser
       scheduling.py      builds solver input from the DB (availability, history, pins)
       analysis.py        issues/flags and fairness stats for a rota
+      hints.py           history-based hints for choosing who takes an unpopular day
+      history.py         who was on call when (and who covered for whom)
+      special_days.py    public holidays + team special days
       segments.py        interval maths for shifts (splits, merges, reassignments)
       slots.py           day slots and periods, timezone/DST aware
       transfer.py        JSON/CSV import and export

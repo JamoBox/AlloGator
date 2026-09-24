@@ -26,8 +26,9 @@ import {
 } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { useConfig, useMe } from '../api/hooks';
+import { useConfig, useMe, usePrefetch } from '../api/hooks';
 import { initials, personColor } from '../lib/people';
+import { CrocLogo } from './brand';
 import { DevUserSwitcher } from './DevUserSwitcher';
 import { NotificationsMenu } from './NotificationsMenu';
 
@@ -37,6 +38,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const config = useConfig();
   const location = useLocation();
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
+  const prefetch = usePrefetch();
 
   const isActive = (path: string) =>
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
@@ -51,14 +53,17 @@ export function Layout({ children }: { children: ReactNode }) {
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
           <Group gap="xs" wrap="nowrap">
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-            <UnstyledButton component={Link} to="/" onClick={close}>
+            <UnstyledButton component={Link} to="/" onClick={close} className="ag-logo" aria-label="AlloGator home">
               <Group gap={6} wrap="nowrap">
-                <Text fz={26} lh={1} aria-hidden>
-                  🐊
-                </Text>
-                <Title order={3} c="gator.8">
-                  AlloGator
-                </Title>
+                <CrocLogo size={38} title="" />
+                <div>
+                  <Title order={3} c="gator.8" lh={1}>
+                    AlloGator
+                  </Title>
+                  <Text size="10px" c="dimmed" lh={1.2} visibleFrom="xs">
+                    snappy on-call allocation
+                  </Text>
+                </div>
               </Group>
             </UnstyledButton>
           </Group>
@@ -145,6 +150,7 @@ export function Layout({ children }: { children: ReactNode }) {
                   description={m.role === 'leader' ? 'Leader' : undefined}
                   active={location.pathname.startsWith(`/teams/${m.team_id}`)}
                   onClick={close}
+                  onMouseEnter={() => prefetch.team(m.team_id)}
                 />
               ))}
             </>

@@ -18,7 +18,7 @@ import { IconPlus } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
-import { keys, useAction, useRotaDefaults, useRotas } from '../../api/hooks';
+import { keys, useAction, usePrefetch, useRotaDefaults, useRotas } from '../../api/hooks';
 import type { RotaDetail, TeamDetail } from '../../api/types';
 import { dayjs, fmtDateRange, ISO } from '../../lib/dates';
 import { RotaStatusBadge } from '../common';
@@ -26,6 +26,7 @@ import { RotaStatusBadge } from '../common';
 export function RotasTab({ team }: { team: TeamDetail }) {
   const rotas = useRotas(team.id);
   const navigate = useNavigate();
+  const prefetch = usePrefetch();
   const [opened, modal] = useDisclosure(false);
   const today = dayjs().format(ISO);
 
@@ -73,6 +74,7 @@ export function RotasTab({ team }: { team: TeamDetail }) {
                     key={r.id}
                     style={{ cursor: 'pointer', opacity: past ? 0.7 : 1 }}
                     onClick={() => navigate(`/teams/${team.id}/rotas/${r.id}`)}
+                    onMouseEnter={() => prefetch.rota(r.id, team.is_leader)}
                   >
                     <Table.Td>
                       <Text fw={600} size="sm">

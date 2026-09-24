@@ -23,6 +23,22 @@ export function NotificationsMenu() {
   const list = useNotifications();
   const navigate = useNavigate();
   const markRead = useAction((ids: number[] | null) => api('/api/notifications/read', { body: { ids } }), {
+    optimistic: (ids, qc) => {
+      const prevList = qc.getQueryData<Notification[]>(keys.notifications);
+      const prevCount = qc.getQueryData<{ count: number }>(keys.unread);
+      const now = new Date().toISOString();
+      if (prevList)
+        qc.setQueryData(
+          keys.notifications,
+          prevList.map((n) => (!n.read_at && (ids === null || ids.includes(n.id)) ? { ...n, read_at: now } : n)),
+        );
+      if (prevCount)
+        qc.setQueryData(keys.unread, { count: ids === null ? 0 : Math.max(0, prevCount.count - ids.length) });
+      return () => {
+        qc.setQueryData(keys.notifications, prevList);
+        qc.setQueryData(keys.unread, prevCount);
+      };
+    },
     invalidate: [keys.notifications],
   });
 
