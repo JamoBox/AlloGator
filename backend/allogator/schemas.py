@@ -428,6 +428,8 @@ class SwapRequestOut(BaseModel):
     offers: list[SwapOfferOut]
     can_offer: bool
     warnings: list[str]
+    # Days (from today) the requester marked as unavailable or partly available; open swaps only.
+    requester_unavailable: list[AvailabilityEntry] = Field(default_factory=list)
 
 
 # --- Misc ----------------------------------------------------------------------------------

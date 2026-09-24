@@ -138,6 +138,18 @@
 .ag-day[data-marked] {
   border: 2px dashed var(--mantine-color-grape-5);
 }
+/* The other person can't (or can only partly) do this day. */
+.ag-day[data-warn] {
+  background: var(--ag-partial);
+  border-color: var(--ag-partial-strong);
+}
+.ag-day[data-warn='unavailable'] {
+  background: var(--mantine-color-orange-light);
+  border-color: var(--mantine-color-orange-6);
+}
+.ag-day[data-warn][data-selected] {
+  background: var(--mantine-color-orange-light-hover);
+}
 
 /* ---- Rota board (people x days) ---- */
 .ag-board {

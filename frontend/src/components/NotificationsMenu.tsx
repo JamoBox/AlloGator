@@ -26,11 +26,10 @@ export function NotificationsMenu() {
     optimistic: (ids, qc) => {
       const prevList = qc.getQueryData<Notification[]>(keys.notifications);
       const prevCount = qc.getQueryData<{ count: number }>(keys.unread);
-      const now = new Date().toISOString();
       if (prevList)
         qc.setQueryData(
           keys.notifications,
-          prevList.map((n) => (!n.read_at && (ids === null || ids.includes(n.id)) ? { ...n, read_at: now } : n)),
+          ids === null ? [] : prevList.filter((n) => !ids.includes(n.id)),
         );
       if (prevCount)
         qc.setQueryData(keys.unread, { count: ids === null ? 0 : Math.max(0, prevCount.count - ids.length) });
@@ -85,7 +84,7 @@ export function NotificationsMenu() {
           <Stack gap={0}>
             {list.data?.length === 0 && (
               <Text c="dimmed" size="sm" p="sm">
-                Nothing yet.
+                You're all caught up.
               </Text>
             )}
             {list.data?.map((n) => (

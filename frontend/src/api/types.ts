@@ -291,6 +291,8 @@ export interface SwapRequest {
   offers: SwapOffer[];
   can_offer: boolean;
   warnings: string[];
+  /** Days the requester marked as unavailable or partly available (open requests only). */
+  requester_unavailable: AvailabilityEntry[];
 }
 
 export interface Notification {

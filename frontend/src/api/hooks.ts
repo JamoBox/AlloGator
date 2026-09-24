@@ -140,7 +140,8 @@ export const useRotaHistory = (id: number, enabled = true) =>
 export const useNotifications = () =>
   useQuery({
     queryKey: keys.notifications,
-    queryFn: () => api<Notification[]>('/api/notifications?limit=30'),
+    // Only unacknowledged ones: acknowledging clears a notification from the list.
+    queryFn: () => api<Notification[]>('/api/notifications?unread_only=true&limit=50'),
     refetchInterval: 60_000,
   });
 
