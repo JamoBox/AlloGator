@@ -376,10 +376,14 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
     since = grid.start_date - HOLIDAY_LOOKBACK
     past_specials = team_special_days(db, rota.team, since, grid.start_date)
     past = team_history(db, rota.team_id, since, grid.start_date, exclude_rota_id=rota.id)
-    holiday_now: dict[int, int] = defaultdict(int)
+    holiday_now: dict[int, list[date]] = defaultdict(list)
     for slot, pieces in zip(grid.days, per_day, strict=True):
         if slot.day in specials and (uid := seg.day_majority(pieces)) is not None:
-            holiday_now[uid] += 1
+            holiday_now[uid].append(slot.day)
+
+    def holiday_list(days: list[date], labels: dict[date, str]) -> list[dict[str, Any]]:
+        return [{"date": d, "label": labels[d]} for d in sorted(days)]
+
     day_share: dict[int, float] = defaultdict(float)
     for slot, pieces in zip(grid.days, per_day, strict=True):
         total = (slot.end - slot.start).total_seconds()
@@ -400,6 +404,7 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
     for uid in all_ids:
         m = member_by_user.get(uid)
         entries = unav.get(uid, {})
+        past_holidays = [d for d in past[uid].days if d in past_specials] if uid in past else []
         stats.append(
             {
                 "user_id": uid,
@@ -414,10 +419,10 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
                 "unavailable_days": sum(1 for e in entries.values() if e.kind == AVAIL_UNAVAILABLE),
                 "partial_days": sum(1 for e in entries.values() if e.kind == AVAIL_PARTIAL),
                 "history_days": round(hist.get(uid, 0.0), 1),
-                "holiday_days": holiday_now.get(uid, 0),
-                "holiday_history": sum(1 for d in past[uid].days if d in past_specials)
-                if uid in past
-                else 0,
+                "holiday_days": len(holiday_now.get(uid, [])),
+                "holiday_history": len(past_holidays),
+                "holiday_dates": holiday_list(holiday_now.get(uid, []), specials),
+                "holiday_history_dates": holiday_list(past_holidays, past_specials),
                 "submitted": uid in submitted,
             }
         )

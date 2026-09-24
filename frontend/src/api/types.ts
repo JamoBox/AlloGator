@@ -136,6 +136,8 @@ export interface RotaDetail extends Rota {
   days: Day[];
   shifts: Shift[];
   people: User[];
+  /** On-call members who haven't confirmed their dates yet. */
+  unsubmitted: User[];
   shifts_visible: boolean;
   solver_info: SolverInfo | null;
 }
@@ -213,6 +215,8 @@ export interface PersonStats {
   history_days: number;
   holiday_days: number;
   holiday_history: number;
+  holiday_dates: { date: string; label: string }[];
+  holiday_history_dates: { date: string; label: string }[];
   submitted: boolean;
 }
 
@@ -250,12 +254,20 @@ export interface TeamSchedule {
   shifts: ScheduleShift[];
 }
 
+export interface SwapSlot {
+  rota_id: number;
+  start_at: string;
+  end_at: string;
+}
+
 export interface SwapOffer {
   id: number;
   offerer: User;
   rota_id: number | null;
   start_at: string | null;
   end_at: string | null;
+  /** The time given back in exchange; empty for an offer to just cover it. */
+  slots: SwapSlot[];
   note: string;
   status: 'pending' | 'accepted' | 'declined' | 'withdrawn';
   created_at: string;
@@ -271,6 +283,7 @@ export interface SwapRequest {
   requester: User;
   start_at: string;
   end_at: string;
+  slots: SwapSlot[];
   note: string;
   status: 'open' | 'accepted' | 'cancelled';
   created_at: string;

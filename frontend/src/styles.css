@@ -120,6 +120,25 @@
   min-height: 12px;
 }
 
+/* Day picker (swaps): only on-call days can be picked. */
+.ag-day[data-disabled] {
+  cursor: default;
+  opacity: 0.35;
+}
+.ag-day[data-disabled]:hover {
+  box-shadow: none;
+}
+.ag-day[data-pickable] {
+  background: var(--mantine-color-gator-light);
+  border-color: var(--mantine-color-gator-4);
+}
+.ag-day[data-pickable][data-selected] {
+  background: var(--mantine-color-blue-light);
+}
+.ag-day[data-marked] {
+  border: 2px dashed var(--mantine-color-grape-5);
+}
+
 /* ---- Rota board (people x days) ---- */
 .ag-board {
   border-collapse: separate;

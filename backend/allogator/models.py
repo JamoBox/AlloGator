@@ -265,6 +265,11 @@ class SwapRequest(Base):
     offers: Mapped[list[SwapOffer]] = relationship(
         back_populates="request", cascade="all, delete-orphan", order_by="SwapOffer.created_at"
     )
+    slots: Mapped[list[SwapSlot]] = relationship(
+        foreign_keys="SwapSlot.request_id",
+        cascade="all, delete-orphan",
+        order_by="SwapSlot.start_at",
+    )
 
 
 class SwapOffer(Base):
@@ -290,6 +295,34 @@ class SwapOffer(Base):
     request: Mapped[SwapRequest] = relationship(back_populates="offers")
     offerer: Mapped[User] = relationship()
     rota: Mapped[Rota | None] = relationship()
+    slots: Mapped[list[SwapSlot]] = relationship(
+        foreign_keys="SwapSlot.offer_id",
+        cascade="all, delete-orphan",
+        order_by="SwapSlot.start_at",
+    )
+
+
+class SwapSlot(Base):
+    """One block of time in a swap request or offer, which may cover several separate days.
+
+    The parent's ``rota_id``/``start_at``/``end_at`` hold the overall span; a parent without
+    slot rows (made before slots existed) is a single slot of that span.
+    """
+
+    __tablename__ = "swap_slots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_id: Mapped[int | None] = mapped_column(
+        ForeignKey("swap_requests.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    offer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("swap_offers.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    rota_id: Mapped[int] = mapped_column(ForeignKey("rotas.id", ondelete="CASCADE"))
+    start_at: Mapped[datetime] = mapped_column(DateTime)
+    end_at: Mapped[datetime] = mapped_column(DateTime)
+
+    rota: Mapped[Rota] = relationship()
 
 
 class Notification(Base):
