@@ -293,11 +293,12 @@ function MemberBanner({ rota }: { rota: RotaDetail }) {
 function IssueSummary({ analysis, onOpen }: { analysis: Analysis; onOpen: () => void }) {
   const { errors, warnings, uncovered_days, split_periods } = analysis.summary;
   if (!errors && !warnings) return null;
+  const open = analysis.issues.filter((i) => i.severity !== 'info');
   const parts = [
     uncovered_days ? `${uncovered_days} day(s) with no cover` : null,
     split_periods ? `${split_periods} period(s) with partial cover` : null,
-    analysis.issues.some((i) => i.type === 'conflict') ? 'people scheduled when unavailable' : null,
-    analysis.issues.some((i) => i.type === 'limited') ? 'people on days they are only partly available' : null,
+    open.some((i) => i.type === 'conflict') ? 'people scheduled when unavailable' : null,
+    open.some((i) => i.type === 'limited') ? 'people on days they are only partly available' : null,
   ].filter(Boolean);
   return (
     <Alert color={errors ? 'red' : 'orange'} icon={<IconAlertTriangle />} p="sm">

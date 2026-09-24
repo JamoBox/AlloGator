@@ -112,9 +112,37 @@ def test_full_leader_and_member_workflow(api):
     analysis = api.get(f"/api/rotas/{rota['id']}/analysis").json()
     types = {i["type"] for i in analysis["issues"]}
     assert "uncovered" not in types
-    assert "conflict" in types  # Ben said he couldn't do it
+    # Ben said he couldn't do it, but the leader decided: noted, no longer a problem.
+    conflict = next(i for i in analysis["issues"] if i["type"] == "conflict")
+    assert conflict["severity"] == "info" and conflict["decided"]
     if owners[1] != ben_id:
-        assert "partial_cover" in types
+        cover = next(i for i in analysis["issues"] if i["type"] == "partial_cover")
+        assert cover["severity"] == "info" and cover["decided"]
+    assert analysis["summary"]["errors"] == 0 and analysis["summary"]["warnings"] == 0
+
+    # Availability that changes after the decision is flagged again.
+    thu = wk2_wed + timedelta(days=1)
+    api.post(
+        f"/api/rotas/{rota['id']}/assign",
+        json={"user_id": ben_id, "from_date": thu.isoformat(), "lock": True},
+    )
+    api.as_("ben@example.com").post(
+        "/api/me/unavailability",
+        json={"dates": [thu.isoformat()], "kind": "unavailable", "note": "Dentist"},
+    )
+    analysis = api.get(f"/api/rotas/{rota['id']}/analysis").json()
+    conflicts = [i for i in analysis["issues"] if i["type"] == "conflict"]
+    assert {(i["start_date"], i["severity"]) for i in conflicts} == {
+        (wk2_wed.isoformat(), "info"),
+        (thu.isoformat(), "error"),
+    }
+    # Re-confirming the assignment settles it.
+    api.post(
+        f"/api/rotas/{rota['id']}/assign",
+        json={"user_id": ben_id, "from_date": thu.isoformat(), "lock": True},
+    )
+    analysis = api.get(f"/api/rotas/{rota['id']}/analysis").json()
+    assert analysis["summary"]["errors"] == 0
 
     # Regenerate keeping locked days: the manual edit survives.
     rota = api.post(

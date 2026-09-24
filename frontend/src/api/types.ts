@@ -194,6 +194,8 @@ export interface Issue {
   owner_id?: number;
   candidates?: Candidate[];
   covers?: { user_id: number; start_at: string; end_at: string; start_date: string; end_date: string }[];
+  /** A leader assigned this on purpose; reported for information, not as a problem. */
+  decided?: boolean;
 }
 
 export interface PersonStats {
