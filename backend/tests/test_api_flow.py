@@ -79,6 +79,13 @@ def test_full_leader_and_member_workflow(api):
     matrix = api.as_("ben@example.com").get(f"/api/rotas/{rota['id']}/availability").json()
     assert any(e["note"] == "busy 13:00-17:00" for e in matrix["entries"])
 
+    # Leaders can see who still has to confirm.
+    rota = api.get(f"/api/rotas/{rota['id']}").json()
+    assert len(rota["unsubmitted"]) == 4
+    amy.post(f"/api/rotas/{rota['id']}/submit", json={"comment": ""})
+    rota = api.get(f"/api/rotas/{rota['id']}").json()
+    assert "amy@example.com" not in {u["email"] for u in rota["unsubmitted"]}
+
     # Submissions; the last one notifies leaders.
     for email in [LEADER, *MEMBERS]:
         api.as_(email).post(f"/api/rotas/{rota['id']}/submit", json={"comment": ""})
@@ -312,6 +319,61 @@ def test_swap_cover_only_and_cancel(api):
     api.as_(helper).post(f"/api/swaps/{swap['id']}/offers", json={}, expect=409)
     swap = req.post(f"/api/swaps/{swap['id']}/cancel").json()
     assert swap["status"] == "cancelled" and swap["offers"][0]["status"] == "declined"
+
+
+def test_swap_separate_days_and_withdraw(api):
+    team = make_team(api)
+    rota = _published_rota(api, team, weeks=4)
+    p0, p1 = rota["periods"][0], rota["periods"][1]
+    requester_id, offerer_id = p0["owner_id"], p1["owner_id"]
+    assert requester_id != offerer_id
+    email = {m["user"]["id"]: m["user"]["email"] for m in team["members"]}
+    requester, offerer = api.as_(email[requester_id]), api.as_(email[offerer_id])
+    days0 = [d for d in rota["days"] if d["period_index"] == 0]
+    days1 = [d for d in rota["days"] if d["period_index"] == 1]
+
+    def slot(d):
+        return {"rota_id": rota["id"], "start_at": d["start_at"], "end_at": d["end_at"]}
+
+    # Two separate days, plus two touching days that are joined into one slot.
+    swap = requester.post(
+        "/api/swaps",
+        json={"slots": [slot(days0[5]), slot(days0[2]), slot(days0[3])]},
+        expect=201,
+    ).json()
+    assert [s["start_at"] for s in swap["slots"]] == [days0[2]["start_at"], days0[5]["start_at"]]
+    assert swap["slots"][0]["end_at"] == days0[3]["end_at"]
+    # Every slot must be yours.
+    offerer.post("/api/swaps", json={"slots": [slot(days1[0]), slot(days0[0])]}, expect=409)
+
+    # An offer made and then withdrawn disappears, and the requester is told.
+    swap = offerer.post(
+        f"/api/swaps/{swap['id']}/offers",
+        json={"slots": [slot(days1[1])], "note": "Maybe?"},
+        expect=201,
+    ).json()
+    offer = swap["offers"][0]
+    swap = offerer.post(f"/api/swaps/{swap['id']}/offers/{offer['id']}/withdraw").json()
+    assert swap["offers"] == [] and swap["can_offer"]
+    assert requester.get("/api/notifications").json()[0]["kind"] == "swap_withdrawn"
+
+    # Offer two separate days back and accept.
+    swap = offerer.post(
+        f"/api/swaps/{swap['id']}/offers",
+        json={"slots": [slot(days1[1]), slot(days1[4])]},
+        expect=201,
+    ).json()
+    offer = swap["offers"][0]
+    assert len(offer["slots"]) == 2
+    requester.post(f"/api/swaps/{swap['id']}/offers/{offer['id']}/accept")
+
+    by_date = {d["date"]: d for d in api.get(f"/api/rotas/{rota['id']}").json()["days"]}
+    for d in (days0[2], days0[3], days0[5]):
+        assert by_date[d["date"]]["user_ids"] == [offerer_id]
+    assert by_date[days0[4]["date"]]["user_ids"] == [requester_id]
+    for d in (days1[1], days1[4]):
+        assert by_date[d["date"]]["user_ids"] == [requester_id]
+    assert by_date[days1[2]["date"]]["user_ids"] == [offerer_id]
 
 
 def test_permissions(api):

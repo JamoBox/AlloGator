@@ -24,6 +24,7 @@ import type { ScheduleShift } from '../api/types';
 import { CrocEmpty } from '../components/brand';
 import { CalendarButton, RotaStatusBadge, SectionTitle } from '../components/common';
 import { dayjs, fmtDateLong, fmtDateRange, fmtDateTime, fromNow } from '../lib/dates';
+import { fmtSlots } from '../lib/swapDays';
 
 export function Dashboard() {
   const me = useMe();
@@ -106,7 +107,7 @@ export function Dashboard() {
                   color="grape"
                   to={`/teams/${s.team_id}/swaps?request=${s.id}`}
                   title={`${s.requester.name} needs cover`}
-                  detail={`${s.team_name} · ${fmtDateTime(s.start_at)} → ${fmtDateTime(s.end_at)}`}
+                  detail={`${s.team_name} · ${fmtSlots(s.slots)}`}
                   action="Help out"
                 />
               ))}
@@ -119,7 +120,7 @@ export function Dashboard() {
                     color={pending ? 'orange' : 'gray'}
                     to={`/teams/${s.team_id}/swaps?request=${s.id}`}
                     title={pending ? `${pending} offer(s) on your swap request` : 'Your swap request is open'}
-                    detail={`${fmtDateTime(s.start_at)} → ${fmtDateTime(s.end_at)}`}
+                    detail={fmtSlots(s.slots)}
                     action={pending ? 'Review' : 'View'}
                   />
                 );

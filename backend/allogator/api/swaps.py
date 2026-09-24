@@ -23,20 +23,60 @@ from ..models import (
     User,
     utcnow,
 )
-from ..schemas import OfferCreate, SwapCreate, SwapRequestOut
+from ..schemas import OfferCreate, SlotIn, SwapCreate, SwapRequestOut
 from ..services import segments as seg
 from ..services.notify import Notifier, audit
 from ..services.scheduling import rota_segments, team_memberships, write_segments
 from ..services.slots import RotaGrid, get_zone, to_naive_utc
-from .serialize import swap_out
+from .serialize import new_slots, slots_of, swap_out
 
 router = APIRouter(prefix="/api", tags=["swaps"])
+
+Slot = tuple[Rota, datetime, datetime]
+MAX_SLOTS = 120
 
 
 def _fmt(rota: Rota, start: datetime, end: datetime) -> str:
     grid = RotaGrid.for_rota(rota)
     a, b = grid.local(start), grid.local(end)
     return f"{a:%a %d %b %H:%M} → {b:%a %d %b %H:%M}"
+
+
+def _fmt_slots(slots: list[Slot]) -> str:
+    return "; ".join(_fmt(r, a, b) for r, a, b in slots)
+
+
+def _parse_slots(db: Session, body: SwapCreate | OfferCreate) -> list[Slot]:
+    """The slots in a request body, in order, with touching blocks joined up."""
+    raw = list(body.slots)
+    if body.rota_id is not None or body.start_at is not None or body.end_at is not None:
+        if body.rota_id is None or body.start_at is None or body.end_at is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "A slot needs rota_id, start_at and end_at"
+            )
+        raw.append(SlotIn(rota_id=body.rota_id, start_at=body.start_at, end_at=body.end_at))
+    rotas: dict[int, Rota] = {}
+    slots: list[Slot] = []
+    for s in raw:
+        if s.rota_id not in rotas:
+            rotas[s.rota_id] = get_rota(db, s.rota_id)
+        rota = rotas[s.rota_id]
+        tz = get_zone(rota.timezone)
+        start, end = to_naive_utc(s.start_at, tz), to_naive_utc(s.end_at, tz)
+        if end <= start:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "End must be after start")
+        slots.append((rota, start, end))
+    if len({r.team_id for r in rotas.values()}) > 1:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick slots from one team")
+    merged: list[Slot] = []
+    for rota, start, end in sorted(slots, key=lambda x: (x[1], x[2])):
+        if merged and merged[-1][0].id == rota.id and start <= merged[-1][2]:
+            merged[-1] = (rota, merged[-1][1], max(merged[-1][2], end))
+        else:
+            merged.append((rota, start, end))
+    if len(merged) > MAX_SLOTS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "That's too many separate slots")
+    return merged
 
 
 def _check_slot(rota: Rota, user_id: int, start: datetime, end: datetime, whose: str) -> None:
@@ -101,22 +141,25 @@ def create_swap(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    rota = get_rota(db, body.rota_id)
+    slots = _parse_slots(db, body)
+    if not slots:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick the time you need covered")
+    rota = slots[0][0]
     require_member(db, rota.team_id, user)
-    tz = get_zone(rota.timezone)
-    start, end = to_naive_utc(body.start_at, tz), to_naive_utc(body.end_at, tz)
-    _check_slot(rota, user.id, start, end, "You aren't")
+    for r, start, end in slots:
+        _check_slot(r, user.id, start, end, "You aren't")
     swap = SwapRequest(
         team_id=rota.team_id,
         rota_id=rota.id,
         requester_id=user.id,
-        start_at=start,
-        end_at=end,
+        start_at=slots[0][1],
+        end_at=max(end for _, _, end in slots),
         note=body.note.strip(),
+        slots=new_slots(slots),
     )
     db.add(swap)
     db.flush()
-    when = _fmt(rota, start, end)
+    when = _fmt_slots(slots)
     notifier = Notifier(db, background)
     notifier.notify(
         [m.user for m in team_memberships(db, rota.team_id) if m.on_call],
@@ -163,19 +206,16 @@ def make_offer(
         raise HTTPException(status.HTTP_409_CONFLICT, "You already have a pending offer here")
 
     offer = SwapOffer(request_id=swap.id, offerer_id=user.id, note=body.note.strip())
-    if body.start_at is not None or body.end_at is not None or body.rota_id is not None:
-        if body.start_at is None or body.end_at is None or body.rota_id is None:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST, "An offered slot needs rota_id, start_at and end_at"
-            )
-        offer_rota = get_rota(db, body.rota_id)
-        if offer_rota.team_id != swap.team_id:
+    slots = _parse_slots(db, body)
+    if slots:
+        if slots[0][0].team_id != swap.team_id:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Offer a slot from the same team")
-        tz = get_zone(offer_rota.timezone)
-        start, end = to_naive_utc(body.start_at, tz), to_naive_utc(body.end_at, tz)
-        _check_slot(offer_rota, user.id, start, end, "You aren't")
-        offer.rota_id, offer.start_at, offer.end_at = offer_rota.id, start, end
-        what = f"offered to swap their slot {_fmt(offer_rota, start, end)}"
+        for r, start, end in slots:
+            _check_slot(r, user.id, start, end, "You aren't")
+        offer.rota_id = slots[0][0].id
+        offer.start_at, offer.end_at = slots[0][1], max(end for _, _, end in slots)
+        offer.slots = new_slots(slots)
+        what = f"offered to swap their slot {_fmt_slots(slots)}"
     else:
         what = "offered to cover it"
     db.add(offer)
@@ -185,7 +225,7 @@ def make_offer(
         [swap.requester],
         "swap_offer",
         f"{user.name} responded to your swap request",
-        f"For your slot {_fmt(swap.rota, swap.start_at, swap.end_at)}, {user.name} {what}."
+        f"For your slot {_fmt_slots(slots_of(swap))}, {user.name} {what}."
         + (f"\n\nNote: {offer.note}" if offer.note else "")
         + "\n\nAccept or decline it in AlloGator.",
         link=_link(swap),
@@ -223,75 +263,34 @@ def accept_offer(
         raise HTTPException(status.HTTP_409_CONFLICT, "That offer is no longer pending")
 
     # Re-validate against the current schedule: things may have changed since.
-    _check_slot(
-        swap.rota,
-        swap.requester_id,
-        swap.start_at,
-        swap.end_at,
-        f"{swap.requester.name} is no longer",
-    )
-    if offer.rota is not None:
-        _check_slot(
-            offer.rota,
-            offer.offerer_id,
-            offer.start_at,
-            offer.end_at,
-            f"{offer.offerer.name} is no longer",
-        )
+    requested, offered = slots_of(swap), slots_of(offer)
+    for r, start, end in requested:
+        _check_slot(r, swap.requester_id, start, end, f"{swap.requester.name} is no longer")
+    for r, start, end in offered:
+        _check_slot(r, offer.offerer_id, start, end, f"{offer.offerer.name} is no longer")
 
     requester, offerer = swap.requester, offer.offerer
     note = f"Swap #{swap.id}: {requester.name} ↔ {offerer.name}"
     rota = swap.rota
-    grid = RotaGrid.for_rota(rota)
-    segs = seg.reassign(
-        rota_segments(rota),
-        grid,
-        swap.start_at,
-        swap.end_at,
-        offerer.id,
-        locked=True,
-        source="swap",
-        note=note,
-    )
-    if offer.rota is not None and offer.rota_id == rota.id:
-        segs = seg.reassign(
-            segs,
-            grid,
-            offer.start_at,
-            offer.end_at,
-            requester.id,
-            locked=True,
-            source="swap",
-            note=note,
-        )
-    write_segments(db, rota, segs)
-    if offer.rota is not None and offer.rota_id != rota.id:
-        other = offer.rota
-        other_grid = RotaGrid.for_rota(other)
-        write_segments(
-            db,
-            other,
-            seg.reassign(
-                rota_segments(other),
-                other_grid,
-                offer.start_at,
-                offer.end_at,
-                requester.id,
-                locked=True,
-                source="swap",
-                note=note,
-            ),
-        )
+    # Both sides' slots may span several rotas: reassign each rota's segments, then write once.
+    work: dict[int, tuple[Rota, RotaGrid, list[seg.Segment]]] = {}
+    for slots, uid in ((requested, offerer.id), (offered, requester.id)):
+        for r, start, end in slots:
+            _, grid, segs = work.get(r.id) or (r, RotaGrid.for_rota(r), rota_segments(r))
+            segs = seg.reassign(segs, grid, start, end, uid, locked=True, source="swap", note=note)
+            work[r.id] = (r, grid, segs)
+    for r, _, segs in work.values():
+        write_segments(db, r, segs)
 
     now = utcnow()
     swap.status = SWAP_ACCEPTED
     swap.resolved_at = now
     offer.status = OFFER_ACCEPTED
     notifier = Notifier(db, background)
-    req_when = _fmt(rota, swap.start_at, swap.end_at)
+    req_when = _fmt_slots(requested)
     summary = f"{offerer.name} now covers {req_when}"
-    if offer.rota is not None:
-        summary += f"; {requester.name} now covers {_fmt(offer.rota, offer.start_at, offer.end_at)}"
+    if offered:
+        summary += f"; {requester.name} now covers {_fmt_slots(offered)}"
     for other_offer in swap.offers:
         if other_offer.id != offer.id and other_offer.status == OFFER_PENDING:
             other_offer.status = OFFER_DECLINED
@@ -363,7 +362,7 @@ def decline_offer(
         [offer.offerer],
         "swap_declined",
         f"{swap.requester.name} declined your swap offer",
-        f"Your offer for {_fmt(swap.rota, swap.start_at, swap.end_at)} was declined.",
+        f"Your offer for {_fmt_slots(slots_of(swap))} was declined.",
         link=_link(swap),
     )
     db.commit()
@@ -375,6 +374,7 @@ def decline_offer(
 def withdraw_offer(
     swap_id: int,
     offer_id: int,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -385,7 +385,27 @@ def withdraw_offer(
     if offer.status != OFFER_PENDING:
         raise HTTPException(status.HTTP_409_CONFLICT, "That offer is no longer pending")
     offer.status = OFFER_WITHDRAWN
+    notifier = Notifier(db, background)
+    notifier.notify(
+        [swap.requester],
+        "swap_withdrawn",
+        f"{user.name} withdrew their swap offer",
+        f"{user.name} is no longer offering to help with {_fmt_slots(slots_of(swap))}.",
+        link=_link(swap),
+        email=False,
+    )
+    audit(
+        db,
+        "swap.withdrawn",
+        f"{user.name} withdrew their offer",
+        actor=user,
+        team_id=swap.team_id,
+        rota_id=swap.rota_id,
+        data={"swap_id": swap.id, "offer_id": offer.id},
+    )
     db.commit()
+    notifier.flush()
+    db.refresh(swap)
     return swap_out(db, swap, user)
 
 
@@ -411,7 +431,7 @@ def cancel_swap(
         [o.offerer for o in pending],
         "swap_cancelled",
         f"{swap.requester.name} cancelled their swap request",
-        f"The swap request for {_fmt(swap.rota, swap.start_at, swap.end_at)} was cancelled.",
+        f"The swap request for {_fmt_slots(slots_of(swap))} was cancelled.",
         link=_link(swap),
     )
     audit(

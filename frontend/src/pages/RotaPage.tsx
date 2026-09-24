@@ -55,7 +55,7 @@ import {
   useTeam,
 } from '../api/hooks';
 import type { Analysis, Day, RotaDetail, ScheduleShift, TeamDetail } from '../api/types';
-import { CalendarButton, downloadOrToast, RotaStatusBadge } from '../components/common';
+import { CalendarButton, downloadOrToast, PersonChip, RotaStatusBadge } from '../components/common';
 import { IssuesPanel } from '../components/rota/IssuesPanel';
 import { PeriodsList } from '../components/rota/PeriodsList';
 import { type BoardActions, RotaBoard } from '../components/rota/RotaBoard';
@@ -312,6 +312,37 @@ function IssueSummary({ analysis, onOpen }: { analysis: Analysis; onOpen: () => 
   );
 }
 
+/** Send a reminder to everyone who hasn't confirmed their dates, after a confirmation. */
+function useRemind(rota: RotaDetail) {
+  const remind = useAction(() => api<{ reminded: number }>(`/api/rotas/${rota.id}/remind`, { method: 'POST' }), {
+    success: (r) => `Reminder sent to ${r.reminded} ${r.reminded === 1 ? 'person' : 'people'}`,
+    invalidate: [keys.rotaHistory(rota.id)],
+  });
+  const confirm = () => {
+    const who = rota.unsubmitted;
+    modals.openConfirmModal({
+      title: 'Send a reminder?',
+      children: (
+        <Stack gap="xs">
+          <Text size="sm">
+            {who.length === 1 ? 'This person gets' : `These ${who.length} people get`} an email and an
+            in-app notification asking them to confirm their dates
+            {rota.availability_deadline ? ` by ${fmtDateLong(rota.availability_deadline)}` : ''}:
+          </Text>
+          <Group gap={6}>
+            {who.map((u) => (
+              <PersonChip key={u.id} user={u} />
+            ))}
+          </Group>
+        </Stack>
+      ),
+      labels: { confirm: 'Send reminder', cancel: 'Cancel' },
+      onConfirm: () => remind.mutate(undefined),
+    });
+  };
+  return { confirm, isPending: remind.isPending };
+}
+
 function useAssign(rota: RotaDetail) {
   const key = keys.rota(rota.id);
   return useAction(
@@ -393,15 +424,29 @@ function BoardWithActions({
         title={decide ? `Who should take ${dayjs(decide.date).format('ddd D MMM')}${decide.holiday ? ` (${decide.holiday})` : ''}?` : ''}
       >
         {decide && (
-          <DecisionHelper
-            rotaId={rota.id}
-            from={decide.date}
-            to={decide.date}
-            onPick={(uid) => {
-              setDecide(null);
-              assign.mutate({ user_id: uid, from_date: decide.date });
-            }}
-          />
+          <Stack gap="sm">
+            <DecisionHelper
+              rotaId={rota.id}
+              from={decide.date}
+              to={decide.date}
+              onPick={(uid) => {
+                setDecide(null);
+                assign.mutate({ user_id: uid, from_date: decide.date });
+              }}
+            />
+            <Group justify="flex-end">
+              <Button
+                size="compact-sm"
+                variant="subtle"
+                onClick={() => {
+                  setDecide(null);
+                  setCustom({ userId: null, day: decide });
+                }}
+              >
+                Only part of the day…
+              </Button>
+            </Group>
+          </Stack>
         )}
       </Modal>
     </>
@@ -462,19 +507,17 @@ function CustomRangeForm({
 
 function IssuesWithActions({ rota, analysis, editable }: { rota: RotaDetail; analysis: Analysis; editable: boolean }) {
   const assign = useAssign(rota);
-  const remind = useAction(() => api<{ reminded: number }>(`/api/rotas/${rota.id}/remind`, { method: 'POST' }), {
-    success: (r) => `Reminder sent to ${r.reminded} people`,
-  });
+  const remind = useRemind(rota);
   return (
     <IssuesPanel
-      rotaId={rota.id}
+      rota={rota}
       analysis={analysis}
-      people={rota.people}
       editable={editable}
       actions={{
         assignDates: (userId, from, to) => assign.mutate({ user_id: userId, from_date: from, to_date: to }),
         assignPeriod: (userId, periodIndex) => assign.mutate({ user_id: userId, period_index: periodIndex }),
-        remind: () => remind.mutate(undefined),
+        assign: (body) => assign.mutateAsync(body),
+        remind: remind.confirm,
       }}
     />
   );
@@ -518,10 +561,7 @@ function LeaderActions({
   const hasSchedule = rota.days.some((d) => d.user_ids.some((u) => u != null));
   const lockedDays = rota.days.filter((d) => d.locked).length;
 
-  const remind = useAction(() => api<{ reminded: number }>(`/api/rotas/${rota.id}/remind`, { method: 'POST' }), {
-    success: (r) => `Reminder sent to ${r.reminded} people`,
-    invalidate: inv,
-  });
+  const remind = useRemind(rota);
   const publish = useAction(() => api<RotaDetail>(`/api/rotas/${rota.id}/publish`, { method: 'POST' }), {
     setData: (r) => [[keys.rota(rota.id), r]],
     invalidate: inv,
@@ -575,8 +615,14 @@ function LeaderActions({
       case 'collecting':
         return (
           <>
-            <Button variant="default" leftSection={<IconBell size={16} />} onClick={() => remind.mutate(undefined)} loading={remind.isPending}>
-              Remind ({rota.eligible_count - rota.submitted_count})
+            <Button
+              variant="default"
+              leftSection={<IconBell size={16} />}
+              onClick={remind.confirm}
+              loading={remind.isPending}
+              disabled={rota.unsubmitted.length === 0}
+            >
+              Remind ({rota.unsubmitted.length})
             </Button>
             <Button leftSection={<IconChomp size={16} />} onClick={generateModal.open}>
               Generate rota
@@ -758,7 +804,7 @@ function GenerateForm({
   onDone: () => void;
 }) {
   const [keepLocked, setKeepLocked] = useState(true);
-  const missing = rota.eligible_count - rota.submitted_count;
+  const missing = rota.unsubmitted;
   const gen = useAction(
     () =>
       api<{ rota: RotaDetail; analysis: Analysis }>(`/api/rotas/${rota.id}/generate`, {
@@ -795,12 +841,19 @@ function GenerateForm({
       {hasSchedule && (
         <Text size="sm">Regenerating may produce a different, equally fair arrangement.</Text>
       )}
-      {missing > 0 && rota.requested_at && (
+      {missing.length > 0 && rota.requested_at && (
         <Alert color="orange" p="xs" icon={<IconAlertTriangle size={16} />}>
-          <Text size="sm">
-            {missing} {missing === 1 ? 'person hasn’t' : 'people haven’t'} confirmed their dates
-            yet. You can generate anyway and regenerate later.
-          </Text>
+          <Stack gap={6}>
+            <Text size="sm">
+              {missing.length === 1 ? 'This person hasn’t' : `These ${missing.length} people haven’t`}{' '}
+              confirmed their dates yet. You can generate anyway and regenerate later.
+            </Text>
+            <Group gap={6}>
+              {missing.map((u) => (
+                <PersonChip key={u.id} user={u} />
+              ))}
+            </Group>
+          </Stack>
         </Alert>
       )}
       {lockedDays > 0 && (

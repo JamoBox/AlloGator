@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import is_leader, membership_of
 from ..models import (
+    OFFER_WITHDRAWN,
     ROTA_PUBLISHED,
     SWAP_OPEN,
     AvailabilitySubmission,
@@ -17,6 +18,7 @@ from ..models import (
     Shift,
     SwapOffer,
     SwapRequest,
+    SwapSlot,
     Team,
     User,
 )
@@ -28,6 +30,7 @@ from ..schemas import (
     RotaOut,
     ScheduleShift,
     ShiftOut,
+    SlotOut,
     SwapOfferOut,
     SwapRequestOut,
     TeamDetail,
@@ -197,6 +200,11 @@ def rota_detail(db: Session, rota: Rota, user: User) -> RotaDetail:
         if u.id not in {m.id for m in member_users}
     ]
     people = [user_out(u) for u in sorted(member_users + extra_users, key=lambda u: u.name.lower())]
+    submitted = {s.user_id for s in rota.submissions}
+    unsubmitted = sorted(
+        (m.user for m in rota.team.memberships if m.on_call and m.user_id not in submitted),
+        key=lambda u: u.name.lower(),
+    )
     return rota_out(
         db,
         rota,
@@ -206,6 +214,7 @@ def rota_detail(db: Session, rota: Rota, user: User) -> RotaDetail:
         days=days,
         shifts=shifts,
         people=people,
+        unsubmitted=[user_out(u) for u in unsubmitted],
         shifts_visible=visible,
         solver_info=rota.solver_info if is_leader(db, rota.team_id, user) else None,
     )
@@ -244,22 +253,47 @@ def _unavailable_overlap(db: Session, user_id: int, rota: Rota, start, end) -> l
     return out
 
 
+def slots_of(item: SwapRequest | SwapOffer) -> list[tuple[Rota, datetime, datetime]]:
+    """The blocks of time in a swap request or offer (none: an offer to just cover it)."""
+    if item.slots:
+        return [(s.rota, s.start_at, s.end_at) for s in item.slots]
+    if item.rota is not None and item.start_at is not None and item.end_at is not None:
+        return [(item.rota, item.start_at, item.end_at)]
+    return []
+
+
+def new_slots(slots: list[tuple[Rota, datetime, datetime]]) -> list[SwapSlot]:
+    return [SwapSlot(rota_id=r.id, start_at=a, end_at=b) for r, a, b in slots]
+
+
+def _slots_out(slots: list[tuple[Rota, datetime, datetime]]) -> list[SlotOut]:
+    return [
+        SlotOut(
+            rota_id=r.id,
+            start_at=utc_to_local(a, get_zone(r.timezone)),
+            end_at=utc_to_local(b, get_zone(r.timezone)),
+        )
+        for r, a, b in slots
+    ]
+
+
 def offer_out(db: Session, swap: SwapRequest, offer: SwapOffer) -> SwapOfferOut:
     warnings = []
-    for w in _unavailable_overlap(db, offer.offerer_id, swap.rota, swap.start_at, swap.end_at):
-        warnings.append(f"{offer.offerer.name} marked {w}")
-    tz = get_zone(swap.rota.timezone)
-    if offer.rota is not None and offer.start_at and offer.end_at:
-        for w in _unavailable_overlap(
-            db, swap.requester_id, offer.rota, offer.start_at, offer.end_at
-        ):
+    for rota, start, end in slots_of(swap):
+        for w in _unavailable_overlap(db, offer.offerer_id, rota, start, end):
+            warnings.append(f"{offer.offerer.name} marked {w}")
+    offered = slots_of(offer)
+    for rota, start, end in offered:
+        for w in _unavailable_overlap(db, swap.requester_id, rota, start, end):
             warnings.append(f"{swap.requester.name} marked {w}")
+    tz = get_zone(swap.rota.timezone)
     return SwapOfferOut(
         id=offer.id,
         offerer=user_out(offer.offerer),
         rota_id=offer.rota_id,
         start_at=utc_to_local(offer.start_at, tz) if offer.start_at else None,
         end_at=utc_to_local(offer.end_at, tz) if offer.end_at else None,
+        slots=_slots_out(offered),
         note=offer.note,
         status=offer.status,
         created_at=utc_to_local(offer.created_at, tz),
@@ -277,12 +311,13 @@ def swap_out(db: Session, swap: SwapRequest, user: User) -> SwapRequestOut:
         and user.id != swap.requester_id
         and not any(o.offerer_id == user.id and o.status == "pending" for o in swap.offers)
     )
-    holders = seg.holders(rota_segments(swap.rota), swap.start_at, swap.end_at)
+    slots = slots_of(swap)
     warnings = []
-    if swap.status == SWAP_OPEN and holders != {swap.requester_id}:
+    segs = {r.id: rota_segments(r) for r, _, _ in slots} if swap.status == SWAP_OPEN else {}
+    if segs and any(seg.holders(segs[r.id], a, b) != {swap.requester_id} for r, a, b in slots):
         warnings.append(
             "The schedule has changed since this request was made; "
-            f"{swap.requester.name} no longer holds all of this slot."
+            f"{swap.requester.name} no longer holds all of this time."
         )
     return SwapRequestOut(
         id=swap.id,
@@ -293,11 +328,13 @@ def swap_out(db: Session, swap: SwapRequest, user: User) -> SwapRequestOut:
         requester=user_out(swap.requester),
         start_at=utc_to_local(swap.start_at, tz),
         end_at=utc_to_local(swap.end_at, tz),
+        slots=_slots_out(slots),
         note=swap.note,
         status=swap.status,
         created_at=utc_to_local(swap.created_at, tz),
         resolved_at=utc_to_local(swap.resolved_at, tz) if swap.resolved_at else None,
-        offers=[offer_out(db, swap, o) for o in swap.offers],
+        # A withdrawn offer is taken back entirely, note and all.
+        offers=[offer_out(db, swap, o) for o in swap.offers if o.status != OFFER_WITHDRAWN],
         can_offer=can_offer,
         warnings=warnings,
     )

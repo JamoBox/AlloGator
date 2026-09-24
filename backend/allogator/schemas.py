@@ -248,6 +248,8 @@ class RotaDetail(RotaOut):
     days: list[DayOut]
     shifts: list[ShiftOut]
     people: list[UserOut]
+    # On-call members who haven't confirmed their dates yet.
+    unsubmitted: list[UserOut] = Field(default_factory=list)
     shifts_visible: bool
     solver_info: dict[str, Any] | None = None
 
@@ -364,18 +366,36 @@ class TeamSchedule(BaseModel):
 # --- Swaps ---------------------------------------------------------------------------------
 
 
-class SwapCreate(BaseModel):
+class SlotIn(BaseModel):
     rota_id: int
     start_at: datetime
     end_at: datetime
+
+
+class SwapCreate(BaseModel):
+    """The time to hand over: ``slots`` (separate days are fine), or one rota_id/start/end."""
+
+    rota_id: int | None = None
+    start_at: datetime | None = None
+    end_at: datetime | None = None
+    slots: list[SlotIn] = Field(default_factory=list, max_length=120)
     note: str = Field(default="", max_length=1000)
 
 
 class OfferCreate(BaseModel):
+    """Slots offered in exchange; none means "I'll just cover it"."""
+
     rota_id: int | None = None
     start_at: datetime | None = None
     end_at: datetime | None = None
+    slots: list[SlotIn] = Field(default_factory=list, max_length=120)
     note: str = Field(default="", max_length=1000)
+
+
+class SlotOut(BaseModel):
+    rota_id: int
+    start_at: datetime
+    end_at: datetime
 
 
 class SwapOfferOut(BaseModel):
@@ -384,6 +404,7 @@ class SwapOfferOut(BaseModel):
     rota_id: int | None
     start_at: datetime | None
     end_at: datetime | None
+    slots: list[SlotOut]
     note: str
     status: str
     created_at: datetime
@@ -399,6 +420,7 @@ class SwapRequestOut(BaseModel):
     requester: UserOut
     start_at: datetime
     end_at: datetime
+    slots: list[SlotOut]
     note: str
     status: str
     created_at: datetime
