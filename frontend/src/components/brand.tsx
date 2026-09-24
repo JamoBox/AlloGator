@@ -1,11 +1,12 @@
 import { Stack, Text, Title } from '@mantine/core';
 import { type ReactNode, useId } from 'react';
 
-const TILE = 'M17 18H47A11 11 0 0 1 58 29V47A11 11 0 0 1 47 58H17A11 11 0 0 1 6 47V29A11 11 0 0 1 17 18Z';
+const TILE =
+  'M16 20H48A10 10 0 0 1 58 30V44A10 10 0 0 1 48 54H16A10 10 0 0 1 6 44V30A10 10 0 0 1 16 20Z';
 const UPPER_JAW =
-  'M0 0H64V29.4L56 29.4L52 35.4L48 29.4L44 35.4L40 29.4L36 35.4L32 29.4L28 35.4L24 29.4L20 35.4L16 29.4L12 35.4L8 29.4L0 29.4Z';
+  'M0 0H64V38.7L52 38.7L48 42.2L44 38.7L40 42.2L36 38.7L32 42.2L28 38.7L24 42.2L20 38.7L16 42.2L12 38.7L0 38.7Z';
 const LOWER_JAW =
-  'M0 64H64V32.6L56 32.6L52 38.6L48 32.6L44 38.6L40 32.6L36 38.6L32 32.6L28 38.6L24 32.6L20 38.6L16 32.6L12 38.6L8 32.6L0 32.6Z';
+  'M0 64H64V41.3L52 41.3L48 44.8L44 41.3L40 44.8L36 41.3L32 44.8L28 41.3L24 44.8L20 41.3L16 44.8L12 41.3L0 41.3Z';
 
 /**
  * The AlloGator mark: a gator peeking out of a calendar tile, its eyes doubling as the binder
@@ -48,7 +49,7 @@ export function CrocLogo({
           <rect width="64" height="64" fill="#fff" />
           {sleepy ? (
             <path
-              d="M17.5 16.5Q21 19.5 24.5 16.5M39.5 16.5Q43 19.5 46.5 16.5"
+              d="M17.5 17.5Q21 20.5 24.5 17.5M39.5 17.5Q43 20.5 46.5 17.5"
               stroke="#000"
               strokeWidth="2.4"
               strokeLinecap="round"
@@ -56,19 +57,26 @@ export function CrocLogo({
             />
           ) : (
             <>
-              <circle cx="21" cy="15.5" r="4.2" fill="#000" />
-              <circle cx="43" cy="15.5" r="4.2" fill="#000" />
+              <circle cx="21" cy="17.5" r="4" fill="#000" />
+              <circle cx="43" cy="17.5" r="4" fill="#000" />
             </>
           )}
         </mask>
       </defs>
       <g className="croc-upper">
         <g mask={`url(#${eyes})`}>
-          <circle cx="21" cy="16" r="9" />
-          <circle cx="43" cy="16" r="9" />
+          <circle cx="21" cy="18" r="8.5" />
+          <circle cx="43" cy="18" r="8.5" />
           <path d={UPPER_JAW} clipPath={`url(#${tile})`} />
         </g>
-        {!sleepy && <path d="M21 12.4v6.2M43 12.4v6.2" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />}
+        {!sleepy && (
+          <path
+            d="M21 14.5v6M43 14.5v6"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+          />
+        )}
       </g>
       <g className="croc-lower">
         <path d={LOWER_JAW} clipPath={`url(#${tile})`} />
