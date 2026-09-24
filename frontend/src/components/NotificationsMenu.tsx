@@ -9,7 +9,7 @@ import {
   Text,
   UnstyledButton,
 } from '@mantine/core';
-import { IconBell } from '@tabler/icons-react';
+import { IconBell, IconCheck } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
@@ -42,9 +42,8 @@ export function NotificationsMenu() {
     invalidate: [keys.notifications],
   });
 
+  // Opening a notification keeps the list open and leaves it unread: acknowledging is explicit.
   const open = (n: Notification) => {
-    if (!n.read_at) markRead.mutate([n.id]);
-    setOpened(false);
     if (n.link) navigate(n.link);
   };
 
@@ -79,7 +78,7 @@ export function NotificationsMenu() {
             disabled={count === 0}
             onClick={() => markRead.mutate(null)}
           >
-            Mark all read
+            Acknowledge all
           </Button>
         </Group>
         <ScrollArea.Autosize mah={420}>
@@ -90,22 +89,36 @@ export function NotificationsMenu() {
               </Text>
             )}
             {list.data?.map((n) => (
-              <UnstyledButton
+              <Group
                 key={n.id}
-                onClick={() => open(n)}
+                gap="xs"
+                wrap="nowrap"
+                align="flex-start"
                 p="sm"
                 style={{
                   borderTop: '1px solid var(--mantine-color-default-border)',
                   background: n.read_at ? undefined : 'var(--mantine-primary-color-light)',
                 }}
               >
-                <Text size="sm" fw={n.read_at ? 400 : 600} lineClamp={2}>
-                  {n.title}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  {fromNow(n.created_at)}
-                </Text>
-              </UnstyledButton>
+                <UnstyledButton onClick={() => open(n)} style={{ flex: 1, minWidth: 0 }}>
+                  <Text size="sm" fw={n.read_at ? 400 : 600} lineClamp={2}>
+                    {n.title}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {fromNow(n.created_at)}
+                  </Text>
+                </UnstyledButton>
+                {!n.read_at && (
+                  <Button
+                    size="compact-xs"
+                    variant="light"
+                    leftSection={<IconCheck size={12} />}
+                    onClick={() => markRead.mutate([n.id])}
+                  >
+                    Acknowledge
+                  </Button>
+                )}
+              </Group>
             ))}
           </Stack>
         </ScrollArea.Autosize>
