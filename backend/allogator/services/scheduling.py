@@ -1,0 +1,240 @@
+"""Glue between the database and the solver: building inputs and writing results."""
+
+from __future__ import annotations
+
+import random
+from collections import defaultdict
+from datetime import date, timedelta
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..config import get_settings
+from ..models import (
+    AVAIL_PARTIAL,
+    AVAIL_UNAVAILABLE,
+    ROTA_PUBLISHED,
+    ROTA_REVIEW,
+    Membership,
+    Rota,
+    Shift,
+    Unavailability,
+    User,
+    utcnow,
+)
+from . import segments as seg
+from .slots import RotaGrid
+from .solver import SolverInput, SolverResult, solve
+
+
+def eligible_memberships(db: Session, team_id: int) -> list[Membership]:
+    return list(
+        db.scalars(
+            select(Membership)
+            .join(User)
+            .where(Membership.team_id == team_id, Membership.on_call.is_(True), User.active)
+            .order_by(User.display_name, User.email)
+        )
+    )
+
+
+def team_memberships(db: Session, team_id: int) -> list[Membership]:
+    return list(
+        db.scalars(
+            select(Membership)
+            .join(User)
+            .where(Membership.team_id == team_id)
+            .order_by(User.display_name, User.email)
+        )
+    )
+
+
+def load_unavailability(
+    db: Session, user_ids: list[int], start: date, end: date
+) -> dict[int, dict[date, Unavailability]]:
+    """Unavailability entries for users within [start, end)."""
+    out: dict[int, dict[date, Unavailability]] = defaultdict(dict)
+    if not user_ids:
+        return out
+    rows = db.scalars(
+        select(Unavailability).where(
+            Unavailability.user_id.in_(user_ids),
+            Unavailability.day >= start,
+            Unavailability.day < end,
+        )
+    )
+    for row in rows:
+        out[row.user_id][row.day] = row
+    return out
+
+
+def write_segments(db: Session, rota: Rota, segments: list[seg.Segment]) -> None:
+    rota.shifts = [
+        Shift(
+            period_index=s.period_index,
+            user_id=s.user_id,
+            start_at=s.start,
+            end_at=s.end,
+            locked=s.locked,
+            source=s.source,
+            note=s.note,
+        )
+        for s in segments
+    ]
+    db.flush()
+
+
+def rota_segments(rota: Rota) -> list[seg.Segment]:
+    grid = RotaGrid.for_rota(rota)
+    if not rota.shifts:
+        return seg.empty(grid)
+    return seg.from_shifts(rota.shifts)
+
+
+def history_days(db: Session, rota: Rota, user_ids: list[int], since: date) -> dict[int, float]:
+    """On-call days per user in this team's *other* published rotas between ``since`` and the
+    start of ``rota``."""
+    if not user_ids:
+        return {}
+    grid = RotaGrid.for_rota(rota)
+    window_start = RotaGrid(since, 1, 1, rota.handover_time, rota.timezone).start
+    rows = db.execute(
+        select(Shift.user_id, Shift.start_at, Shift.end_at)
+        .join(Rota)
+        .where(
+            Rota.team_id == rota.team_id,
+            Rota.id != rota.id,
+            Rota.status == ROTA_PUBLISHED,
+            Shift.user_id.in_(user_ids),
+            Shift.end_at > window_start,
+            Shift.start_at < grid.start,
+        )
+    )
+    totals: dict[int, float] = defaultdict(float)
+    for user_id, start, end in rows:
+        s = max(start, window_start)
+        e = min(end, grid.start)
+        if s < e:
+            totals[user_id] += (e - s).total_seconds() / 86400
+    return dict(totals)
+
+
+def fairness_offsets(
+    db: Session, rota: Rota, memberships: list[Membership], lookback_days: int
+) -> tuple[dict[int, int], dict[int, float]]:
+    """Per-user fairness offset: how far above/below the team average each person's recent
+    on-call load is. People who joined during the lookback window are treated as average so
+    that newcomers are not flooded with shifts."""
+    if lookback_days <= 0 or not memberships:
+        return {}, {}
+    since = rota.start_date - timedelta(days=lookback_days)
+    ids = [m.user_id for m in memberships]
+    hist = history_days(db, rota, ids, since)
+    grid_start = RotaGrid(since, 1, 1, rota.handover_time, rota.timezone).start
+    veterans = [m.user_id for m in memberships if m.joined_at <= grid_start]
+    if not veterans:
+        return {}, hist
+    mean = sum(hist.get(u, 0.0) for u in veterans) / len(veterans)
+    cap = rota.period_days * 2
+    offsets = {}
+    for u in veterans:
+        dev = hist.get(u, 0.0) - mean
+        offsets[u] = int(round(max(-cap, min(cap, dev))))
+    return offsets, hist
+
+
+def previous_owner(db: Session, rota: Rota) -> int | None:
+    grid = RotaGrid.for_rota(rota)
+    instant = grid.start - timedelta(minutes=1)
+    return db.scalar(
+        select(Shift.user_id)
+        .join(Rota)
+        .where(
+            Rota.team_id == rota.team_id,
+            Rota.id != rota.id,
+            Rota.status == ROTA_PUBLISHED,
+            Shift.start_at <= instant,
+            Shift.end_at > instant,
+        )
+        .limit(1)
+    )
+
+
+def generate(
+    db: Session,
+    rota: Rota,
+    *,
+    seed: int | None = None,
+    keep_locked: bool = True,
+    time_limit: float | None = None,
+) -> SolverResult:
+    settings = get_settings()
+    team = rota.team
+    grid = RotaGrid.for_rota(rota)
+    current = rota_segments(rota)
+    locked = [s for s in current if s.locked] if keep_locked else []
+
+    # Days fully covered by locked segments are pinned for the solver.
+    pinned: dict[int, int | None] = {}
+    for slot, pieces in zip(grid.days, seg.day_assignments(locked, grid), strict=True):
+        covered = sum(p.seconds for p in pieces)
+        users = {p.user_id for p in pieces}
+        if pieces and covered >= (slot.end - slot.start).total_seconds() and len(users) == 1:
+            pinned[slot.index] = next(iter(users))
+
+    memberships = eligible_memberships(db, rota.team_id)
+    member_ids = [m.user_id for m in memberships]
+    unav = load_unavailability(db, member_ids, grid.start_date, grid.end_date)
+    unavailable: dict[int, set[int]] = defaultdict(set)
+    limited: dict[int, set[int]] = defaultdict(set)
+    for user_id, days in unav.items():
+        for day, entry in days.items():
+            idx = grid.day_index(day)
+            if idx is None:
+                continue
+            if entry.kind == AVAIL_UNAVAILABLE:
+                unavailable[user_id].add(idx)
+            elif entry.kind == AVAIL_PARTIAL:
+                limited[user_id].add(idx)
+
+    offsets, _ = fairness_offsets(db, rota, memberships, team.fairness_lookback_days)
+    if seed is None:
+        seed = random.randrange(1, 2**31)
+
+    result = solve(
+        SolverInput(
+            num_days=len(grid.days),
+            periods=[(p.first_day, p.end_day) for p in grid.periods],
+            members=member_ids,
+            unavailable=dict(unavailable),
+            limited=dict(limited),
+            history=offsets,
+            pinned=pinned,
+            previous_owner=previous_owner(db, rota),
+            avoid_back_to_back=team.avoid_back_to_back,
+            seed=seed,
+            time_limit=time_limit if time_limit is not None else settings.solver_time_limit_seconds,
+            stall_seconds=settings.solver_stall_seconds,
+            workers=settings.solver_workers,
+        )
+    )
+
+    generated = [
+        seg.Segment(slot.start, slot.end, result.assignment[slot.index], source="generated")
+        for slot in grid.days
+    ]
+    write_segments(db, rota, seg.paint(generated, grid, locked))
+    rota.generated_at = utcnow()
+    rota.solver_info = {
+        "status": result.status,
+        "objective": result.objective,
+        "seconds": round(result.wall_time, 3),
+        "seed": seed,
+        "pinned_days": len(pinned),
+        "kept_locked": keep_locked,
+        "history_offsets": {str(k): v for k, v in offsets.items()},
+    }
+    if rota.status != ROTA_PUBLISHED:
+        rota.status = ROTA_REVIEW
+    db.flush()
+    return result
