@@ -9,8 +9,9 @@ const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 /**
  * Month calendar for picking some of a set of days: tap to toggle a day, drag across a run of
  * days, or shift-click to add everything since the last day picked. Only ``pickable`` days
- * (date -> tooltip) can be chosen; ``marked`` days (date -> tooltip) get a dashed outline, and
- * ``warn`` days are shaded amber (e.g. days the other person can't do).
+ * (date -> tooltip) can be chosen; ``marked`` days (date -> tooltip) get a dashed outline,
+ * ``warn`` days are shaded amber (e.g. days the other person can't do) and ``mine`` days red
+ * (days you said you can't do).
  */
 export function DayPickCalendar({
   pickable,
@@ -18,6 +19,7 @@ export function DayPickCalendar({
   onChange,
   marked,
   warn,
+  mine,
   months = 2,
 }: {
   pickable: Map<string, string>;
@@ -25,9 +27,11 @@ export function DayPickCalendar({
   onChange: (next: Set<string>) => void;
   marked?: Map<string, string>;
   warn?: Map<string, { kind: 'unavailable' | 'partial'; tip: string }>;
+  mine?: Map<string, { kind: 'unavailable' | 'partial'; tip: string }>;
   months?: number;
 }) {
-  const first = [...pickable.keys()].sort()[0];
+  // Start at the earliest day of interest (e.g. the days someone needs covered).
+  const first = [...pickable.keys(), ...(marked?.keys() ?? [])].sort()[0];
   const [month, setMonth] = useState(() => dayjs(first ?? undefined).startOf('month'));
   const drag = useRef<{ anchor: string; base: Set<string> } | null>(null);
   const lastAnchor = useRef<string | null>(null);
@@ -130,7 +134,8 @@ export function DayPickCalendar({
                   const d = dayjs(date);
                   const can = pickable.has(date);
                   const w = warn?.get(date);
-                  const tip = [pickable.get(date), marked?.get(date), w?.tip].filter(Boolean).join(' · ');
+                  const m = mine?.get(date);
+                  const tip = [pickable.get(date), marked?.get(date), m?.tip, w?.tip].filter(Boolean).join(' · ');
                   return (
                     <div
                       key={date}
@@ -141,6 +146,7 @@ export function DayPickCalendar({
                       data-selected={selected.has(date) || undefined}
                       data-marked={marked?.has(date) || undefined}
                       data-warn={w?.kind}
+                      data-mine={m?.kind}
                       data-today={date === today || undefined}
                       data-weekend={d.day() === 0 || d.day() === 6 || undefined}
                       onPointerDown={(e) => begin(date, e)}

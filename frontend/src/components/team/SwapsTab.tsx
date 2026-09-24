@@ -21,9 +21,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client';
-import { keys, useAction, useMe, useMyShifts, useSwaps } from '../../api/hooks';
+import { keys, useAction, useMe, useMyShifts, useMyUnavailability, useSwaps } from '../../api/hooks';
 import type { ScheduleShift, SwapRequest, TeamDetail } from '../../api/types';
-import { eachDay, fmtDateRange, fmtSpan, fromNow, groupRuns, inTz, ISO, toLocalInput } from '../../lib/dates';
+import { eachDay, fmtDate, fmtDateRange, fmtSpan, fromNow, groupRuns, inTz, ISO, toLocalInput } from '../../lib/dates';
 import { fmtSlots, type Slot, shiftDays, slotsForDays } from '../../lib/swapDays';
 import { PersonChip } from '../common';
 import { DayPickCalendar } from '../DayPickCalendar';
@@ -88,6 +88,7 @@ export function SlotPicker({
   initialDate,
   marked,
   warn,
+  mine,
 }: {
   shifts: ScheduleShift[];
   tz: string;
@@ -96,6 +97,7 @@ export function SlotPicker({
   initialDate?: string;
   marked?: Map<string, string>;
   warn?: Map<string, { kind: 'unavailable' | 'partial'; tip: string }>;
+  mine?: Map<string, { kind: 'unavailable' | 'partial'; tip: string }>;
 }) {
   const days = useMemo(() => shiftDays(shifts, tz), [shifts, tz]);
   const pickable = useMemo(
@@ -138,7 +140,7 @@ export function SlotPicker({
   const runs = groupRuns([...selected].map((date) => ({ date })));
   return (
     <Stack gap="sm">
-      <DayPickCalendar pickable={pickable} selected={selected} onChange={setSelected} marked={marked} warn={warn} />
+      <DayPickCalendar pickable={pickable} selected={selected} onChange={setSelected} marked={marked} warn={warn} mine={mine} />
       <Group justify="space-between" gap="xs">
         <Text size="sm" fw={600}>
           {selected.size === 0
@@ -473,6 +475,22 @@ function OfferForm({
       ),
     [swap, first],
   );
+  // Days you've said you can't do yourself.
+  const myUnavailability = useMyUnavailability();
+  const mine = useMemo(
+    () =>
+      new Map(
+        (myUnavailability.data ?? []).map((e) => [
+          e.date,
+          {
+            kind: e.kind,
+            tip: `You said you ${e.kind === 'unavailable' ? "can't do this day" : 'are only partly available'}${e.note ? `: ${e.note}` : ''}`,
+          },
+        ]),
+      ),
+    [myUnavailability.data],
+  );
+  const clashes = [...requested.keys()].filter((d) => mine.has(d)).sort();
   const offer = useAction(
     () =>
       api<SwapRequest>(`/api/swaps/${swap.id}/offers`, {
@@ -489,6 +507,15 @@ function OfferForm({
       <Text size="sm">
         {swap.requester.name} needs cover for <b>{fmtSlots(swap.slots, team.timezone)}</b>.
       </Text>
+      {clashes.length > 0 && (
+        <Alert color="red" p="xs" icon={<IconAlertTriangle size={16} />}>
+          <Text size="sm">
+            You've marked {clashes.map((d) => `${fmtDate(d)} (${mine.get(d)!.kind === 'unavailable' ? "can't do" : 'partly available'})`).join(', ')}{' '}
+            in your availability. You can still offer, but double-check you can cover{' '}
+            {clashes.length === 1 ? 'it' : 'them'}.
+          </Text>
+        </Alert>
+      )}
       <Radio.Group value={mode} onChange={(v) => setMode(v as 'cover' | 'swap')}>
         <Stack gap="xs">
           <Radio value="swap" label="Swap: I'll take it if they take some of my days" disabled={!myShifts.length} />
@@ -497,15 +524,41 @@ function OfferForm({
       </Radio.Group>
       {mode === 'swap' && (
         <>
-          <SlotPicker shifts={myShifts} tz={team.timezone} onChange={setSlots} marked={requested} warn={cant} />
-          {cant.size > 0 && (
+          <SlotPicker
+            shifts={myShifts}
+            tz={team.timezone}
+            onChange={setSlots}
+            marked={requested}
+            warn={cant}
+            mine={mine}
+          />
+          <Group gap="md">
             <Group gap={6}>
-              <span className="ag-legend-swatch" style={{ background: 'var(--mantine-color-orange-light)', borderColor: 'var(--mantine-color-orange-6)' }} />
+              <span className="ag-legend-swatch" style={{ borderColor: 'var(--mantine-color-grape-5)', borderStyle: 'dashed', borderWidth: 2 }} />
               <Text size="xs" c="dimmed">
-                Amber: days {first} said they can't do (hover for details)
+                Needs cover
               </Text>
             </Group>
-          )}
+            {cant.size > 0 && (
+              <Group gap={6}>
+                <span className="ag-legend-swatch" style={{ background: 'var(--mantine-color-orange-light)', borderColor: 'var(--mantine-color-orange-6)' }} />
+                <Text size="xs" c="dimmed">
+                  {first} can't do
+                </Text>
+              </Group>
+            )}
+            {mine.size > 0 && (
+              <Group gap={6}>
+                <span className="ag-legend-swatch" style={{ background: 'var(--ag-unavailable)', borderColor: 'var(--ag-unavailable-strong)' }} />
+                <Text size="xs" c="dimmed">
+                  You can't do
+                </Text>
+              </Group>
+            )}
+            <Text size="xs" c="dimmed">
+              Hover a day for details.
+            </Text>
+          </Group>
         </>
       )}
       <Textarea label="Note" value={note} onChange={(e) => setNote(e.currentTarget.value)} />
