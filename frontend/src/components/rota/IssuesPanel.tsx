@@ -55,7 +55,12 @@ export function IssuesPanel({
         >
           <Stack gap={6}>
             {issue.detail && <Text size="sm">{issue.detail}</Text>}
-            {issue.type === 'partial_cover' && issue.covers && (
+            {issue.decided && (
+              <Text size="xs" c="dimmed">
+                A leader assigned this, so it isn't counted as a problem.
+              </Text>
+            )}
+            {issue.type === 'partial_cover' && issue.covers && !issue.decided && (
               <Text size="xs" c="dimmed">
                 Partial cover is normally avoided; it was used because nobody else could cover the
                 whole period.
@@ -64,6 +69,7 @@ export function IssuesPanel({
             {editable &&
               actions &&
               (issue.type === 'uncovered' || issue.type === 'conflict') &&
+              !issue.decided &&
               issue.start_date &&
               issue.end_date && (
                 <DecisionHelper
@@ -105,7 +111,7 @@ function IssueFixes({
   }
   const cands = issue.candidates ?? [];
   if (!cands.length) return null;
-  if (issue.type === 'partial_cover' && issue.period_index !== undefined) {
+  if (issue.type === 'partial_cover' && issue.period_index !== undefined && !issue.decided) {
     return (
       <Group gap="xs">
         <Text size="xs">Give the whole period to:</Text>

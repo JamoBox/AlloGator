@@ -2,12 +2,16 @@
 
 Works on the *current* shifts (generated or manually edited) against current availability,
 so it stays accurate after edits, swaps or late availability changes.
+
+A leader's manual assignment is a decision, not a problem: availability conflicts and partial
+cover it creates are reported as ``info`` (``decided=True``) rather than errors or warnings,
+unless the person's availability changed after the leader made the call.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -19,6 +23,7 @@ from ..models import (
     ROTA_COLLECTING,
     ROTA_PLANNING,
     ROTA_REVIEW,
+    AuditEvent,
     Membership,
     Rota,
     Unavailability,
@@ -79,6 +84,51 @@ def _candidates(
     return out
 
 
+def _leader_decisions(
+    db: Session, rota: Rota
+) -> list[tuple[int | None, datetime, datetime, datetime]]:
+    """Manual assignments from the audit log: ``(user_id, start, end, decided_at)``."""
+    out = []
+    events = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.rota_id == rota.id, AuditEvent.action == "rota.assigned"
+        )
+    )
+    for ev in events:
+        data = ev.data or {}
+        try:
+            start = datetime.fromisoformat(data["start"])
+            end = datetime.fromisoformat(data["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        out.append((data.get("user_id"), start, end, ev.created_at))
+    return out
+
+
+def _is_decided(
+    piece: seg.Segment,
+    decisions: list[tuple[int | None, datetime, datetime, datetime]],
+    since: datetime | None = None,
+) -> bool:
+    """Whether a leader manually assigned all of ``piece`` to its holder (after ``since``)."""
+    if piece.source != "manual":
+        return False
+    spans = sorted(
+        (max(s, piece.start), min(e, piece.end))
+        for uid, s, e, at in decisions
+        if uid == piece.user_id
+        and s < piece.end
+        and piece.start < e
+        and (since is None or at >= since)
+    )
+    covered = piece.start
+    for s, e in spans:
+        if s > covered:
+            return False
+        covered = max(covered, e)
+    return covered >= piece.end
+
+
 def _group_runs(slots: list[DaySlot]) -> list[list[DaySlot]]:
     runs: list[list[DaySlot]] = []
     for s in slots:
@@ -114,6 +164,7 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
     per_day = seg.day_assignments(segs, grid)
     submitted = {s.user_id for s in rota.submissions}
     has_schedule = bool(rota.shifts)
+    decisions = _leader_decisions(db, rota)
 
     def name(uid: int | None) -> str:
         return users[uid].name if uid in users else "Nobody"
@@ -207,13 +258,14 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
             for c in covers
         )
         detail = f"{name(owner)}'s period has partial cover: {cover_text}."
-        if full:
+        decided = all(_is_decided(p, decisions) for p in pieces)
+        if full and not decided:
             detail += (
                 " Could be covered in full by: " + ", ".join(name(c["user_id"]) for c in full) + "."
             )
         add(
             "partial_cover",
-            "warning",
+            "info" if decided else "warning",
             f"Partial cover in period {period.index + 1} "
             f"({_fmt_range(period.start_date, grid.days[period.end_day - 1].day)})",
             detail,
@@ -223,11 +275,13 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
             owner_id=owner,
             covers=covers,
             candidates=full,
+            decided=decided,
         )
 
     # --- Conflicts with availability ----------------------------------------------------
     conflict_days: dict[int, list[DaySlot]] = defaultdict(list)
     limited_days: dict[int, list[DaySlot]] = defaultdict(list)
+    decided_days: set[tuple[int, int]] = set()
     for slot, pieces in zip(grid.days, per_day, strict=True):
         for uid in {p.user_id for p in pieces if p.user_id is not None}:
             entry = unav.get(uid, {}).get(slot.day)
@@ -237,34 +291,59 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
                 conflict_days[uid].append(slot)
             elif entry.kind == AVAIL_PARTIAL:
                 limited_days[uid].append(slot)
+            else:
+                continue
+            if all(
+                _is_decided(p, decisions, since=entry.updated_at)
+                for p in pieces
+                if p.user_id == uid
+            ):
+                decided_days.add((uid, slot.index))
+
+    def decided_runs(uid: int, slots: list[DaySlot]) -> list[tuple[bool, list[DaySlot]]]:
+        """Runs of consecutive days, split where the leader's decision starts or stops."""
+        out: list[tuple[bool, list[DaySlot]]] = []
+        for s in slots:
+            d = (uid, s.index) in decided_days
+            if out and out[-1][0] == d and out[-1][1][-1].index == s.index - 1:
+                out[-1][1].append(s)
+            else:
+                out.append((d, [s]))
+        return out
+
     for uid, slots in conflict_days.items():
-        for run in _group_runs(slots):
+        for decided, run in decided_runs(uid, slots):
             notes = [unav[uid][s.day].note for s in run if unav[uid][s.day].note]
+            when = _fmt_range(run[0].day, run[-1].day)
             add(
                 "conflict",
-                "error",
-                f"{name(uid)} is scheduled but unavailable: {_fmt_range(run[0].day, run[-1].day)}",
+                "info" if decided else "error",
+                f"{name(uid)} is covering despite being unavailable: {when}"
+                if decided
+                else f"{name(uid)} is scheduled but unavailable: {when}",
                 "; ".join(notes),
                 user_ids=[uid],
                 period_index=run[0].period_index,
                 start_date=run[0].day,
                 end_date=run[-1].day,
                 candidates=_candidates(eligible, unav, [s.day for s in run], exclude={uid}),
+                decided=decided,
             )
     for uid, slots in limited_days.items():
-        for run in _group_runs(slots):
+        for decided, run in decided_runs(uid, slots):
             notes = [
                 f"{s.day:%a %d %b}: {unav[uid][s.day].note}" for s in run if unav[uid][s.day].note
             ]
             add(
                 "limited",
-                "warning",
+                "info" if decided else "warning",
                 f"{name(uid)} has limited availability: {_fmt_range(run[0].day, run[-1].day)}",
                 "; ".join(notes) or "Marked as partially available.",
                 user_ids=[uid],
                 period_index=run[0].period_index,
                 start_date=run[0].day,
                 end_date=run[-1].day,
+                decided=decided,
             )
 
     # --- Back-to-back periods -----------------------------------------------------------
@@ -350,7 +429,9 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
         "uncovered_days": sum(
             1 for pieces in per_day if has_schedule and any(p.user_id is None for p in pieces)
         ),
-        "split_periods": sum(1 for i in issues if i["type"] == "partial_cover"),
+        "split_periods": sum(
+            1 for i in issues if i["type"] == "partial_cover" and not i["decided"]
+        ),
         "holidays": len(specials),
         "owners": owners,
     }
