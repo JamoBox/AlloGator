@@ -167,6 +167,11 @@ def test_hints_for_a_christmas_nobody_can_do(api):
     stats = {s["user_id"]: s for s in res["analysis"]["stats"]}
     assert stats[ben]["holiday_history"] >= 1  # Christmas + Boxing Day 2025
     assert sum(s["holiday_days"] for s in stats.values()) >= 2  # Boxing Day, New Year's Day
+    # ...and say which days they were.
+    assert "Christmas Day" in {h["label"] for h in stats[ben]["holiday_history_dates"]}
+    for s in stats.values():
+        assert len(s["holiday_dates"]) == s["holiday_days"]
+        assert len(s["holiday_history_dates"]) == s["holiday_history"]
 
 
 def test_hints_date_range_limits(api):

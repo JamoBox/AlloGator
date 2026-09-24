@@ -1,6 +1,7 @@
 import { Badge, Progress, Table, Text, Tooltip } from '@mantine/core';
 import { IconCheck } from '@tabler/icons-react';
 import type { Analysis } from '../../api/types';
+import { fmtDateLong } from '../../lib/dates';
 import { personColor } from '../../lib/people';
 import { PersonChip } from '../common';
 
@@ -31,8 +32,13 @@ export function StatsTable({ analysis, showSubmitted }: { analysis: Analysis; sh
             </Table.Th>
             <Table.Th w={180}>Load (recent + this rota)</Table.Th>
             <Table.Th>
-              <Tooltip label="Holidays & special days: this rota / last 2 years" withArrow>
-                <span>Holidays</span>
+              <Tooltip label="Public holidays & team special days they cover in this rota" withArrow>
+                <span>Holidays (this rota)</span>
+              </Tooltip>
+            </Table.Th>
+            <Table.Th>
+              <Tooltip label="Holidays & special days they covered in the 2 years before this rota" withArrow>
+                <span>Holidays (2 yrs)</span>
               </Tooltip>
             </Table.Th>
             <Table.Th>Unavailable</Table.Th>
@@ -64,9 +70,10 @@ export function StatsTable({ analysis, showSubmitted }: { analysis: Analysis; sh
                 </Progress.Root>
               </Table.Td>
               <Table.Td>
-                <Text size="sm">
-                  {s.holiday_days} / {s.holiday_history}
-                </Text>
+                <HolidayCount days={s.holiday_dates} />
+              </Table.Td>
+              <Table.Td>
+                <HolidayCount days={s.holiday_history_dates} />
               </Table.Td>
               <Table.Td>
                 <Text size="sm">
@@ -87,5 +94,22 @@ export function StatsTable({ analysis, showSubmitted }: { analysis: Analysis; sh
         </Table.Tbody>
       </Table>
     </Table.ScrollContainer>
+  );
+}
+
+/** A count of holidays, listing which ones on hover. */
+function HolidayCount({ days }: { days: { date: string; label: string }[] }) {
+  if (!days.length) return <>—</>;
+  return (
+    <Tooltip
+      multiline
+      withArrow
+      label={days.map((d) => `${fmtDateLong(d.date)}: ${d.label}`).join('\n')}
+      style={{ whiteSpace: 'pre-line' }}
+    >
+      <Text size="sm" span td="underline dotted" style={{ cursor: 'help' }}>
+        {days.length}
+      </Text>
+    </Tooltip>
   );
 }

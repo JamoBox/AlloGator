@@ -215,6 +215,8 @@ export interface PersonStats {
   history_days: number;
   holiday_days: number;
   holiday_history: number;
+  holiday_dates: { date: string; label: string }[];
+  holiday_history_dates: { date: string; label: string }[];
   submitted: boolean;
 }
 
