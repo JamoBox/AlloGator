@@ -227,7 +227,7 @@ def solve(inp: SolverInput) -> SolverResult:
         objective.append(rng.randint(0, W_RANDOM_MAX) * var)
 
     m.minimize(sum(objective))
-    _add_greedy_hint(m, inp, y, members, unav)
+    _add_greedy_hint(m, inp, y, members, unav, rng)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = max(0.5, inp.time_limit)
@@ -267,18 +267,27 @@ def solve(inp: SolverInput) -> SolverResult:
     )
 
 
-def _add_greedy_hint(m, inp: SolverInput, y, members, unav) -> None:
+def _add_greedy_hint(m, inp: SolverInput, y, members, unav, rng: random.Random) -> None:
     """Hint a sensible starting point (least-loaded, most-available owner per period, avoiding
-    back-to-back) so the first solution CP-SAT finds is already decent."""
+    back-to-back) so the first solution CP-SAT finds is already decent.
+
+    Loads get up to a period's worth of seeded jitter, so people with similar loads are picked
+    in a different order each time. On few CPU cores the solver can stop close to the hint, so
+    without this "regenerate" would keep returning the same rota."""
     load = {u: int(inp.history.get(u, 0)) for u in members}
     prev = inp.previous_owner
     for p, (a, b) in enumerate(inp.periods):
         cands = [u for u in members if (u, p) in y]
         if not cands:
             continue
+        jitter = {u: rng.uniform(0, b - a) for u in cands}
         best = min(
             cands,
-            key=lambda u: (sum(1 for d in range(a, b) if d in unav[u]), u == prev, load[u]),
+            key=lambda u: (
+                sum(1 for d in range(a, b) if d in unav[u]),
+                u == prev,
+                load[u] + jitter[u],
+            ),
         )
         for u in cands:
             m.add_hint(y[u, p], 1 if u == best else 0)
