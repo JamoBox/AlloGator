@@ -13,10 +13,12 @@ import {
   UnstyledButton,
   useMantineColorScheme,
 } from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
+import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import {
   IconCalendarOff,
   IconHome,
+  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
   IconLogout,
   IconMoon,
   IconSettings,
@@ -34,6 +36,8 @@ import { NotificationsMenu } from './NotificationsMenu';
 
 export function Layout({ children }: { children: ReactNode }) {
   const [opened, { toggle, close }] = useDisclosure();
+  // On desktop the sidebar can be tucked away to give wide pages (the rota board) more room.
+  const [navHidden, setNavHidden] = useLocalStorage({ key: 'allogator.navHidden', defaultValue: false });
   const me = useMe();
   const config = useConfig();
   const location = useLocation();
@@ -46,13 +50,23 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <AppShell
       header={{ height: 56 }}
-      navbar={{ width: 250, breakpoint: 'sm', collapsed: { mobile: !opened } }}
+      navbar={{ width: 250, breakpoint: 'sm', collapsed: { mobile: !opened, desktop: navHidden } }}
       padding="md"
     >
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
           <Group gap="xs" wrap="nowrap">
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              visibleFrom="sm"
+              onClick={() => setNavHidden((h) => !h)}
+              aria-label={navHidden ? 'Show sidebar' : 'Hide sidebar'}
+              title={navHidden ? 'Show sidebar' : 'Hide sidebar'}
+            >
+              {navHidden ? <IconLayoutSidebarLeftExpand size={18} /> : <IconLayoutSidebarLeftCollapse size={18} />}
+            </ActionIcon>
             <UnstyledButton component={Link} to="/" onClick={close} className="ag-logo" aria-label="AlloGator home">
               <Group gap={6} wrap="nowrap">
                 <CrocLogo size={38} title="" />
