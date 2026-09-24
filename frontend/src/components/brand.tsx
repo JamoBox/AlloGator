@@ -1,9 +1,17 @@
 import { Stack, Text, Title } from '@mantine/core';
-import type { ReactNode } from 'react';
+import { type ReactNode, useId } from 'react';
+
+const TILE = 'M17 18H47A11 11 0 0 1 58 29V47A11 11 0 0 1 47 58H17A11 11 0 0 1 6 47V29A11 11 0 0 1 17 18Z';
+const UPPER_JAW =
+  'M0 0H64V29.4L56 29.4L52 35.4L48 29.4L44 35.4L40 29.4L36 35.4L32 29.4L28 35.4L24 29.4L20 35.4L16 29.4L12 35.4L8 29.4L0 29.4Z';
+const LOWER_JAW =
+  'M0 64H64V32.6L56 32.6L52 38.6L48 32.6L44 38.6L40 32.6L36 38.6L32 32.6L28 38.6L24 32.6L20 38.6L16 32.6L12 38.6L8 32.6L0 32.6Z';
 
 /**
- * The AlloGator croc. `chomping` animates the jaws (used while we're busy), `sleepy` closes
- * its eye and mouth (used for "nothing to do" states). Hovering the header logo snaps it shut.
+ * The AlloGator mark: a gator peeking out of a calendar tile, its eyes doubling as the binder
+ * rings and its teeth as the zigzag between the jaws. Flat and single-colour (it follows the
+ * primary colour). `chomping` works the jaws (used while we're busy), `sleepy` closes its eyes
+ * and mouth (used for "nothing to do" states). Hovering the header logo snaps it shut.
  */
 export function CrocLogo({
   size = 40,
@@ -16,6 +24,10 @@ export function CrocLogo({
   sleepy?: boolean;
   title?: string;
 }) {
+  // useId() contains characters that aren't safe inside url(#...) references.
+  const id = `croc${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  const tile = `${id}-tile`;
+  const eyes = `${id}-eyes`;
   return (
     <svg
       className="croc"
@@ -26,73 +38,47 @@ export function CrocLogo({
       viewBox="0 0 64 64"
       role="img"
       aria-label={title}
+      fill="currentColor"
     >
-      <path d="M15 39.2 L57 30.8 Q 51.5 37.4 54.6 43.8 L15 42.4 Z" fill="#7b2d3b" className="croc-mouth" />
-      <g className="croc-lower">
-        <path
-          d="M11 43.4 C 13 42.2, 16 42, 18 42.2 L55 43.4 C 59.5 43.6, 60 46.4, 56.5 47.2 C 48 49.4, 38 50.8, 28 50.6 C 20 50.4, 14 48.6, 11 43.4 Z"
-          fill="#2f9e44"
-        />
-        <path
-          d="M17 48.2 C 26 50.2, 40 49.6, 55 46.4"
-          stroke="#8ce99a"
-          strokeWidth="1.3"
-          fill="none"
-          strokeLinecap="round"
-          opacity=".9"
-        />
-        <path
-          d="M25.9 42.8 L29.1 42.9 L27.5 39.5 Z M32.9 43.1 L36.1 43.2 L34.5 39.7 Z M39.9 43.3 L43.1 43.4 L41.5 40.0 Z M46.4 43.6 L49.6 43.7 L48.0 40.2 Z"
-          fill="#fff"
-        />
-      </g>
+      <defs>
+        <clipPath id={tile}>
+          <path d={TILE} />
+        </clipPath>
+        <mask id={eyes}>
+          <rect width="64" height="64" fill="#fff" />
+          {sleepy ? (
+            <path
+              d="M17.5 16.5Q21 19.5 24.5 16.5M39.5 16.5Q43 19.5 46.5 16.5"
+              stroke="#000"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              fill="none"
+            />
+          ) : (
+            <>
+              <circle cx="21" cy="15.5" r="4.2" fill="#000" />
+              <circle cx="43" cy="15.5" r="4.2" fill="#000" />
+            </>
+          )}
+        </mask>
+      </defs>
       <g className="croc-upper">
-        <path
-          d="M6.2 44 C 3.4 36, 4.6 27.5, 10 22.8 C 12.4 20.6, 15.6 19.6, 18.6 19.4 C 19.6 13.2, 25.4 9.8, 30.4 11.8 C 33.4 13, 35.2 15.8, 35.6 18.6 C 42.4 19.8, 50 21.4, 55.2 22.6 C 57.8 20.8, 60.8 22.2, 60.6 25 C 62.2 27, 61 30.4, 57.8 30.6 L18.6 37.6 C 15.4 38.3, 13.4 40.4, 12.6 44 Z"
-          fill="#40c057"
-        />
-        <path
-          d="M22.3 36.5 L25.7 35.9 L24.0 39.9 Z M29.3 35.3 L32.7 34.7 L31.0 38.7 Z M36.3 34.0 L39.7 33.4 L38.0 37.4 Z M43.3 32.8 L46.7 32.1 L45.0 36.2 Z M49.8 31.6 L53.2 31.0 L51.5 35.0 Z"
-          fill="#fff"
-        />
-        <g fill="#2f9e44">
-          <circle cx="9.2" cy="30" r="1.7" />
-          <circle cx="11.6" cy="25.4" r="1.7" />
-          <circle cx="15.6" cy="22" r="1.6" />
-          <circle cx="42" cy="22.2" r="1" />
-          <circle cx="47" cy="23.2" r="1" />
-          <circle cx="44.5" cy="26" r="0.9" />
+        <g mask={`url(#${eyes})`}>
+          <circle cx="21" cy="16" r="9" />
+          <circle cx="43" cy="16" r="9" />
+          <path d={UPPER_JAW} clipPath={`url(#${tile})`} />
         </g>
-        <ellipse cx="57.2" cy="24" rx="1.1" ry=".8" fill="#1b4d2a" />
-        {sleepy ? (
-          <path
-            d="M22.6 16.4 C 24.6 19.2, 29.4 19.2, 31.4 16.4"
-            stroke="#1c1c1c"
-            strokeWidth="1.6"
-            fill="none"
-            strokeLinecap="round"
-          />
-        ) : (
-          <>
-            <circle cx="27" cy="16.4" r="5.4" fill="#fff" />
-            <circle cx="28.4" cy="16.6" r="2.9" fill="#1c1c1c" className="croc-pupil" />
-            <circle cx="29.4" cy="15.4" r="1" fill="#fff" />
-          </>
-        )}
-        <path
-          d="M21.2 13.6 C 23.6 10.6, 29.4 10, 32.6 13.2"
-          stroke="#2f9e44"
-          strokeWidth="1.6"
-          fill="none"
-          strokeLinecap="round"
-        />
+        {!sleepy && <path d="M21 12.4v6.2M43 12.4v6.2" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />}
+      </g>
+      <g className="croc-lower">
+        <path d={LOWER_JAW} clipPath={`url(#${tile})`} />
       </g>
       {sleepy && (
         <g fill="var(--mantine-color-dimmed)" fontFamily="system-ui, sans-serif" fontWeight="700">
-          <text x="40" y="12" fontSize="8">
+          <text x="52" y="11" fontSize="8">
             z
           </text>
-          <text x="48" y="7" fontSize="6">
+          <text x="58" y="5" fontSize="6">
             z
           </text>
         </g>

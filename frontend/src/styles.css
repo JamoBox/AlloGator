@@ -222,10 +222,11 @@
 }
 
 /* ---- The croc ---- */
+.croc {
+  color: var(--mantine-primary-color-filled);
+}
 .croc .croc-upper,
 .croc .croc-lower {
-  transform-box: view-box;
-  transform-origin: 14px 41px;
   transition: transform 110ms cubic-bezier(0.3, 1.6, 0.6, 1);
 }
 .croc[data-chomping] .croc-upper {
@@ -236,19 +237,19 @@
 }
 .croc[data-sleepy] .croc-upper,
 .ag-logo:hover .croc-upper {
-  transform: rotate(9deg);
+  transform: translateY(1px);
 }
 .croc[data-sleepy] .croc-lower,
 .ag-logo:hover .croc-lower {
-  transform: rotate(-4deg);
+  transform: translateY(-1px);
 }
 @keyframes croc-chomp-upper {
-  0%, 100% { transform: rotate(0deg); }
-  50% { transform: rotate(9deg); }
+  0%, 100% { transform: translateY(-1px); }
+  50% { transform: translateY(1px); }
 }
 @keyframes croc-chomp-lower {
-  0%, 100% { transform: rotate(0deg); }
-  50% { transform: rotate(-4deg); }
+  0%, 100% { transform: translateY(2px); }
+  50% { transform: translateY(-1px); }
 }
 @media (prefers-reduced-motion: reduce) {
   .croc[data-chomping] .croc-upper,
