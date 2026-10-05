@@ -256,13 +256,20 @@ def generate(
     current = rota_segments(rota)
     locked = [s for s in current if s.locked] if keep_locked else []
 
+    def whole_days(segments: list[seg.Segment]) -> dict[int, int | None]:
+        """Day index -> the one person (None = gap) who has the whole day in ``segments``."""
+        out: dict[int, int | None] = {}
+        for slot, pieces in zip(grid.days, seg.day_assignments(segments, grid), strict=True):
+            covered = sum(p.seconds for p in pieces)
+            users = {p.user_id for p in pieces}
+            if pieces and covered >= (slot.end - slot.start).total_seconds() and len(users) == 1:
+                out[slot.index] = next(iter(users))
+        return out
+
     # Days fully covered by locked segments are pinned for the solver.
-    pinned: dict[int, int | None] = {}
-    for slot, pieces in zip(grid.days, seg.day_assignments(locked, grid), strict=True):
-        covered = sum(p.seconds for p in pieces)
-        users = {p.user_id for p in pieces}
-        if pieces and covered >= (slot.end - slot.start).total_seconds() and len(users) == 1:
-            pinned[slot.index] = next(iter(users))
+    pinned = whole_days(locked)
+    # A regenerate should come out differently from what's there now.
+    previous = whole_days(current) if rota.generated_at else {}
 
     memberships = eligible_memberships(db, rota.team_id)
     member_ids = [m.user_id for m in memberships]
@@ -293,6 +300,7 @@ def generate(
             limited=dict(limited),
             history=offsets,
             pinned=pinned,
+            previous=previous,
             previous_owner=previous_owner(db, rota),
             holidays=holiday_idx,
             holiday_history=holiday_history,

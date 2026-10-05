@@ -5,8 +5,9 @@ most one person. Priorities, from most to least important (encoded as objective 
 
 1. Cover every day that anyone can cover.
 2. Give each period to a single person. Partial cover (someone else covering part of a
-   period) is exceptional: minimise the number of split periods, then the number of covered
-   days, then the number of mid-period handovers.
+   period) is avoided where possible: minimise the number of split periods, then the number
+   of covered days, then the number of mid-period handovers. Someone a leader pinned into
+   part of a period gets first call on the rest of it.
 3. Avoid days people marked as "partially available".
 4. Share the load fairly (sum of squared on-call days, offset by recent history).
 5. Share unpopular days (public holidays, team special days) fairly over time: sum of
@@ -52,6 +53,7 @@ class SolverInput:
     limited: dict[int, set[int]] = field(default_factory=dict)  # user -> day indices
     history: dict[int, int] = field(default_factory=dict)  # user -> fairness offset (days)
     pinned: dict[int, int | None] = field(default_factory=dict)  # day -> user (None = gap)
+    previous: dict[int, int | None] = field(default_factory=dict)  # the rota being regenerated
     previous_owner: int | None = None  # on call immediately before the rota starts
     holidays: set[int] = field(default_factory=set)  # day indices of unpopular days
     holiday_history: dict[int, int] = field(default_factory=dict)  # user -> recent holiday days
@@ -102,6 +104,13 @@ def solve(inp: SolverInput) -> SolverResult:
             owners_p.append(y[u, p])
         if owners_p:
             m.add_exactly_one(owners_p)
+
+    # Whoever a leader pinned into part of a period is the natural owner of the rest of it:
+    # anyone else splits the period just to even out the load.
+    for p, (a, b) in enumerate(inp.periods):
+        pinned_here = [y[u, p] for u in _pinned_in(inp, a, b) if (u, p) in y]
+        if pinned_here:
+            objective.append(W_SPLIT_PERIOD * (1 - sum(pinned_here)))
 
     # c[v, d]: v covers open day d because the owner can't.
     c: dict[tuple[int, int], cp_model.IntVar] = {}
@@ -222,8 +231,26 @@ def solve(inp: SolverInput) -> SolverResult:
                     m.add(g1 >= y[u, p] + y[u, p + 2] - 1)
                     objective.append(W_GAP_ONE * g1)
 
-    # Seeded tie-breaking.
-    for var in y.values():
+    # Regenerating shouldn't hand back the rota it replaces unless every alternative is a real
+    # step down: an exact repeat costs a little more than the weakest real preference (plus
+    # enough to outweigh the random tie-break noise below).
+    same = []
+    for d in open_days:
+        if d not in inp.previous:
+            continue
+        a = inp.previous[d]
+        if a is None:
+            same.append(uncovered.get(d, 0))
+            continue
+        p = period_of[d]
+        same.append((y[a, p] if (a, p) in y and d not in unav[a] else 0) + c.get((a, d), 0))
+    if same and not any(isinstance(e, int) for e in same):  # an int is a day that must differ
+        repeat = m.new_bool_var("repeat")
+        m.add(sum(same) <= len(same) - 1 + repeat)
+        objective.append((W_GAP_ONE + W_RANDOM_MAX * (n_periods + len(need))) * repeat)
+
+    # Seeded tie-breaking, for owners and for who covers a day.
+    for var in [*y.values(), *c.values()]:
         objective.append(rng.randint(0, W_RANDOM_MAX) * var)
 
     m.minimize(sum(objective))
@@ -267,6 +294,11 @@ def solve(inp: SolverInput) -> SolverResult:
     )
 
 
+def _pinned_in(inp: SolverInput, a: int, b: int) -> set[int]:
+    """People a leader pinned onto days of the period [a, b)."""
+    return {u for d in range(a, b) if (u := inp.pinned.get(d)) is not None}
+
+
 def _add_greedy_hint(m, inp: SolverInput, y, members, unav, rng: random.Random) -> None:
     """Hint a sensible starting point (least-loaded, most-available owner per period, avoiding
     back-to-back) so the first solution CP-SAT finds is already decent.
@@ -281,9 +313,11 @@ def _add_greedy_hint(m, inp: SolverInput, y, members, unav, rng: random.Random) 
         if not cands:
             continue
         jitter = {u: rng.uniform(0, b - a) for u in cands}
+        pinned_here = _pinned_in(inp, a, b)
         best = min(
             cands,
             key=lambda u: (
+                u not in pinned_here,
                 sum(1 for d in range(a, b) if d in unav[u]),
                 u == prev,
                 load[u] + jitter[u],
@@ -354,7 +388,8 @@ def _greedy(inp: SolverInput, started: float, status_name: str) -> SolverResult:
             if d in inp.pinned:
                 assignment[d] = inp.pinned[d]
         full = [u for u in inp.members if all(free(u, d) for d in open_days)]
-        full.sort(key=lambda u: (u == prev_owner, load[u]))
+        pinned_here = _pinned_in(inp, a, b)
+        full.sort(key=lambda u: (u not in pinned_here, u == prev_owner, load[u]))
         if full:
             owner = full[0]
             for d in open_days:
