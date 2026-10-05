@@ -241,9 +241,16 @@ export function AvailabilityCalendar({
                           .map((r) => fmtDateRange(r[0].date, r[r.length - 1].date))
                           .join(', ')}`}
                   </Text>
-                  <ActionIcon variant="subtle" color="gray" onClick={() => setSelected(new Set())} aria-label="Clear selection">
-                    <IconX size={16} />
-                  </ActionIcon>
+                  <Button
+                    variant="subtle"
+                    color="gray"
+                    size="compact-sm"
+                    leftSection={<IconX size={14} />}
+                    rightSection={<Kbd size="xs">Esc</Kbd>}
+                    onClick={() => setSelected(new Set())}
+                  >
+                    Deselect all
+                  </Button>
                 </Group>
                 {selectedOnCall.length > 0 && (
                   <Alert color="orange" variant="light" p="xs" icon={<IconAlertTriangle size={16} />}>

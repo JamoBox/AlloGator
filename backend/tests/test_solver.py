@@ -94,6 +94,21 @@ def test_pinned_days_are_respected():
     assert 3 not in res.assignment[:7]
 
 
+def test_person_pinned_into_a_week_gets_the_rest_of_it():
+    # Plenty of idle people, but 3 is already on for Wed-Thu: they should finish the week
+    # rather than someone else picking up the other five days to even out the load.
+    periods = weeks(4)
+    for seed in range(4):
+        res = run(
+            num_days=28,
+            periods=periods,
+            members=[1, 2, 3, 4, 5, 6],
+            pinned={9: 3, 10: 3},
+            seed=seed,
+        )
+        assert set(res.assignment[7:14]) == {3}
+
+
 def test_pinned_gap_stays_empty():
     res = run(num_days=7, periods=weeks(1), members=[1], pinned={2: None})
     assert res.assignment[2] is None
@@ -122,6 +137,22 @@ def test_regenerate_with_different_seed_can_differ_but_stays_valid():
     for owners in results:
         assert sorted(Counter(owners).values()) == [2, 2, 2]
     assert len(results) > 1
+
+
+def test_regenerate_never_repeats_when_an_equally_good_rota_exists():
+    kw = {"num_days": 28, "periods": weeks(4), "members": [1, 2, 3, 4]}
+    first = run(**kw, seed=1)
+    previous = dict(enumerate(first.assignment))
+    for seed in range(1, 8):  # seed 1 would reproduce `first` exactly without `previous`
+        assert run(**kw, seed=seed, previous=previous).assignment != first.assignment
+
+
+def test_regenerate_repeats_when_every_alternative_is_worse():
+    # Only person 1 can do the whole week; the alternative splits it.
+    kw = {"num_days": 7, "periods": weeks(1), "members": [1, 2], "unavailable": {2: {3}}}
+    first = run(**kw)
+    assert first.assignment == [1] * 7
+    assert run(**kw, previous=dict(enumerate(first.assignment))).assignment == first.assignment
 
 
 def test_regenerate_varies_even_when_the_solver_stops_early():

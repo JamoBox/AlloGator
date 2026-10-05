@@ -300,12 +300,11 @@ function MemberBanner({ rota }: { rota: RotaDetail }) {
 }
 
 function IssueSummary({ analysis, onOpen }: { analysis: Analysis; onOpen: () => void }) {
-  const { errors, warnings, uncovered_days, split_periods } = analysis.summary;
+  const { errors, warnings, uncovered_days } = analysis.summary;
   if (!errors && !warnings) return null;
   const open = analysis.issues.filter((i) => i.severity !== 'info');
   const parts = [
     uncovered_days ? `${uncovered_days} day(s) with no cover` : null,
-    split_periods ? `${split_periods} period(s) with partial cover` : null,
     open.some((i) => i.type === 'conflict') ? 'people scheduled when unavailable' : null,
     open.some((i) => i.type === 'limited') ? 'people on days they are only partly available' : null,
   ].filter(Boolean);
@@ -904,7 +903,7 @@ function GenerateForm({
     <Stack>
       <Text size="sm">
         AlloGator finds the fairest schedule it can: everyone covered where possible, whole periods
-        per person (partial cover only when nobody can do a full period), nobody on days they can't
+        per person (partial cover avoided where possible), nobody on days they can't
         do, recent on-call load balanced, and no back-to-back periods where avoidable.
       </Text>
       {hasSchedule && (

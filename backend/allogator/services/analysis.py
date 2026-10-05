@@ -3,9 +3,10 @@
 Works on the *current* shifts (generated or manually edited) against current availability,
 so it stays accurate after edits, swaps or late availability changes.
 
-A leader's manual assignment is a decision, not a problem: availability conflicts and partial
-cover it creates are reported as ``info`` (``decided=True``) rather than errors or warnings,
-unless the person's availability changed after the leader made the call.
+A leader's manual assignment is a decision, not a problem: availability conflicts it creates
+are reported as ``info`` (``decided=True``) rather than errors or warnings, unless the person's
+availability changed after the leader made the call. Partial cover is always ``info``: the
+solver avoids it where it can, so it's worth knowing about but never needs a decision.
 """
 
 from __future__ import annotations
@@ -265,7 +266,7 @@ def analyze(db: Session, rota: Rota) -> dict[str, Any]:
             )
         add(
             "partial_cover",
-            "info" if decided else "warning",
+            "info",  # the solver already avoids it; nothing here needs a decision
             f"Partial cover in period {period.index + 1} "
             f"({_fmt_range(period.start_date, grid.days[period.end_day - 1].day)})",
             detail,

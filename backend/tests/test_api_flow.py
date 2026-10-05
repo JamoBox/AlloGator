@@ -106,6 +106,12 @@ def test_full_leader_and_member_workflow(api):
     owners = [p["owner_id"] for p in rota["periods"]]
     assert None not in owners and len(set(owners)) == 4
 
+    # Regenerating never hands back the same rota, even with the same seed.
+    res = api.post(f"/api/rotas/{rota['id']}/generate", json={"seed": 1}).json()
+    again = [p["owner_id"] for p in res["rota"]["periods"]]
+    assert again != owners
+    rota, analysis, owners = res["rota"], res["analysis"], again
+
     # Draft shifts are hidden from members.
     member_view = amy.get(f"/api/rotas/{rota['id']}").json()
     assert member_view["shifts_visible"] is False and member_view["shifts"] == []
@@ -294,7 +300,8 @@ def test_swap_request_offer_accept(api):
 
     # The partial cover now shows up in the analysis, and calendars reflect the swap.
     analysis = api.get(f"/api/rotas/{rota['id']}/analysis").json()
-    assert any(i["type"] == "partial_cover" for i in analysis["issues"])
+    covers = [i for i in analysis["issues"] if i["type"] == "partial_cover"]
+    assert covers and all(i["severity"] == "info" for i in covers)
     cal = Calendar.from_ical(offerer.get("/api/me/calendar.ics").content)
     starts = {e.decoded("dtstart") for e in cal.walk("VEVENT")}
     assert datetime.fromisoformat(req_start) in starts
