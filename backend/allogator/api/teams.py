@@ -33,6 +33,7 @@ from ..auth import (
 from ..config import get_settings
 from ..db import get_db
 from ..models import (
+    AVAIL_KINDS,
     ROLE_LEADER,
     ROTA_PUBLISHED,
     AuditEvent,
@@ -55,15 +56,17 @@ from ..schemas import (
     TeamOut,
     TeamSchedule,
     TeamUpdate,
+    UnavailabilityByLeader,
+    UnavailabilityOut,
 )
 from ..services import transfer
 from ..services.ics import build_calendar
 from ..services.notify import Notifier, audit
-from ..services.scheduling import eligible_memberships
+from ..services.scheduling import RESET, eligible_memberships, save_unavailability
 from ..services.slots import RotaGrid, get_zone, utc_to_local
 from ..services.special_days import is_supported, public_holidays
 from .rotas import default_next_start
-from .serialize import schedule_shift, team_out, user_out
+from .serialize import schedule_shift, team_out, unavailability_out, user_out
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
 
@@ -368,6 +371,56 @@ def remove_member(
     db.commit()
     db.refresh(team)
     return team_out(db, team, user, detail=True)
+
+
+@router.post("/{team_id}/members/{user_id}/unavailability", response_model=list[UnavailabilityOut])
+def set_member_unavailability(
+    team_id: int,
+    user_id: int,
+    body: UnavailabilityByLeader,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """A leader marks (or clears, with kind=null) dates for a member on their behalf, or
+    puts back what the member entered themselves (kind="reset")."""
+    team = get_team(db, team_id)
+    require_leader(db, team.id, user)
+    m = db.scalar(
+        select(Membership).where(Membership.team_id == team.id, Membership.user_id == user_id)
+    )
+    if m is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not a member")
+    rows = save_unavailability(db, m.user, body.dates, body.kind, body.note, set_by=user)
+    dates = sorted(set(body.dates))
+    span = f"{dates[0]:%d %b}" + (f" – {dates[-1]:%d %b}" if len(dates) > 1 else "")
+    what = {
+        None: "cleared",
+        RESET: "reset to what they entered themselves",
+        "unavailable": "marked as can't cover",
+        "partial": "marked as partly available",
+    }[body.kind]
+    audit(
+        db,
+        "availability.set_by_leader",
+        f"{what.capitalize()} {span} for {m.user.name}",
+        actor=user,
+        team_id=team.id,
+        data={"user_id": m.user_id, "dates": [d.isoformat() for d in dates], "kind": body.kind},
+    )
+    note = f" Note: {body.note.strip()}" if body.note.strip() and body.kind in AVAIL_KINDS else ""
+    notifier = Notifier(db, background)
+    notifier.notify(
+        [m.user],
+        "availability_set",
+        f"{user.name} updated your availability",
+        f"{span} {what} ({team.name}).{note}",
+        link="/availability",
+        exclude=[user.id],
+    )
+    db.commit()
+    notifier.flush()
+    return [unavailability_out(u) for u in rows]
 
 
 # --- Schedule ------------------------------------------------------------------------------

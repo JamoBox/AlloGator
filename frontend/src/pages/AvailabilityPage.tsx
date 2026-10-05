@@ -57,7 +57,7 @@ export function AvailabilityPage() {
         if (prev) {
           const set = new Set(a.dates);
           const kept = prev.filter((e) => !set.has(e.date));
-          const added = a.kind ? a.dates.map((date) => ({ date, kind: a.kind!, note: a.note })) : [];
+          const added = a.kind ? a.dates.map((date) => ({ date, kind: a.kind!, note: a.note, added_by: null })) : [];
           qc.setQueryData(
             keys.myUnavailability,
             [...kept, ...added].sort((x, y) => x.date.localeCompare(y.date)),
@@ -151,6 +151,11 @@ export function AvailabilityPage() {
                         {run[0].note}
                       </Text>
                     )}
+                    {run[0].added_by && (
+                      <Text size="xs" c="dimmed" fs="italic">
+                        added by {run[0].added_by}
+                      </Text>
+                    )}
                   </div>
                   <Tooltip label="Remove">
                     <ActionIcon
@@ -179,7 +184,7 @@ function groupByKindAndNote(items: Unavailability[]): Unavailability[][] {
   for (const run of groupRuns(items)) {
     let cur: Unavailability[] = [];
     for (const e of run) {
-      if (cur.length && (cur[0].kind !== e.kind || cur[0].note !== e.note)) {
+      if (cur.length && (cur[0].kind !== e.kind || cur[0].note !== e.note || cur[0].added_by !== e.added_by)) {
         out.push(cur);
         cur = [];
       }

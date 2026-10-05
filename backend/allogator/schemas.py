@@ -289,6 +289,15 @@ class AvailabilityEntry(BaseModel):
     date: date
     kind: str
     note: str
+    set_by: str | None = None  # a leader's name, when they entered it on the person's behalf
+
+
+class AvailabilityCleared(BaseModel):
+    """A day a leader cleared that the member had marked (can be reset)."""
+
+    user_id: int
+    date: date
+    set_by: str | None
 
 
 class AvailabilityMember(BaseModel):
@@ -305,6 +314,7 @@ class AvailabilityMatrix(BaseModel):
     end_date: date
     members: list[AvailabilityMember]
     entries: list[AvailabilityEntry]
+    cleared: list[AvailabilityCleared] = Field(default_factory=list)
 
 
 class SubmitAvailability(BaseModel):
@@ -332,12 +342,18 @@ class UnavailabilityOut(BaseModel):
     date: date
     kind: str
     note: str
+    added_by: str | None = None  # a leader's name, when they entered it on the user's behalf
 
 
 class UnavailabilityBulk(BaseModel):
     dates: list[date] = Field(min_length=1, max_length=800)
     kind: Literal["unavailable", "partial"] | None  # None clears the dates
     note: str = Field(default="", max_length=500)
+
+
+class UnavailabilityByLeader(UnavailabilityBulk):
+    # "reset" puts back what the member themselves entered for those dates.
+    kind: Literal["unavailable", "partial", "reset"] | None
 
 
 # --- Schedules -----------------------------------------------------------------------------

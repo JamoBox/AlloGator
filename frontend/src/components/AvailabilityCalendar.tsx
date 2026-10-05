@@ -351,7 +351,7 @@ function MonthGrid({
           const onCall = onCallDates?.has(date);
           const tip = [
             entry
-              ? `${entry.kind === 'unavailable' ? "Can't cover" : 'Partly available'}${entry.note ? `: ${entry.note}` : ''}`
+              ? `${entry.kind === 'unavailable' ? "Can't cover" : 'Partly available'}${entry.note ? `: ${entry.note}` : ''}${entry.added_by ? ` (added by ${entry.added_by})` : ''}`
               : null,
             onCall ? "You're on call" : null,
             special ? `🎉 ${special}` : null,

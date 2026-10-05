@@ -1,16 +1,21 @@
 import { Avatar, Group, Menu, ScrollArea, SegmentedControl, Switch, Text } from '@mantine/core';
 import { useLocalStorage } from '@mantine/hooks';
 import {
+  IconArrowBackUp,
+  IconBan,
   IconBulb,
   IconCalendarEvent,
+  IconCalendarPlus,
   IconClock,
+  IconClockHour4,
+  IconEraser,
   IconLock,
   IconLockOpen,
   IconUserOff,
   IconUsers,
 } from '@tabler/icons-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { AvailabilityMatrix, Day, RotaDetail, User } from '../../api/types';
+import type { AvailabilityChange, AvailabilityMatrix, Day, RotaDetail, User } from '../../api/types';
 import { dayjs, inTz, ISO } from '../../lib/dates';
 import { initials, personColor } from '../../lib/people';
 import { HoverTip, type HoverTipHandle } from '../HoverTip';
@@ -21,6 +26,10 @@ export interface BoardActions {
   customRange: (userId: number | null, day: Day) => void;
   toggleLock: (day: Day) => void;
   helpDecide?: (day: Day) => void;
+  /** Leader marks, clears or resets one person's availability for some days. */
+  setAvailability?: (userId: number, dates: string[], change: AvailabilityChange) => void;
+  /** Leader opens the several-days editor for one person, starting from this day. */
+  editAvailability?: (userId: number, date: string) => void;
 }
 
 interface Props {
@@ -31,7 +40,7 @@ interface Props {
   highlightUserId?: number;
 }
 
-type Entry = { kind: 'unavailable' | 'partial'; note: string };
+type Entry = { kind: 'unavailable' | 'partial'; note: string; set_by?: string | null };
 type MenuState = { userId: number | null; oncall: boolean; date: string; rect: DOMRect };
 
 /**
@@ -255,6 +264,10 @@ const BoardTable = memo(function BoardTable({
     for (const e of matrix?.entries ?? []) m.set(`${e.user_id}:${e.date}`, e);
     return m;
   }, [matrix]);
+  const cleared = useMemo(
+    () => new Map((matrix?.cleared ?? []).map((c) => [`${c.user_id}:${c.date}`, c])),
+    [matrix],
+  );
   const members = matrix?.members ?? [];
   const assignedIds = new Set(
     rota.days.flatMap((d) => d.user_ids).filter((x): x is number => x != null),
@@ -405,6 +418,7 @@ const BoardTable = memo(function BoardTable({
         {rows.map(({ user, submitted, onCall }) => {
           const cells: PersonCell[] = dayInfo.map(({ d, weekend, start, label }) => {
             const entry = entries.get(`${user.id}:${d.date}`);
+            const gone = cleared.get(`${user.id}:${d.date}`);
             const assigned = showAssignments && d.user_ids.includes(user.id);
             return {
               date: d.date,
@@ -413,6 +427,8 @@ const BoardTable = memo(function BoardTable({
               start,
               kind: entry?.kind,
               note: entry?.note ?? '',
+              by: (entry?.set_by ?? gone?.set_by) || undefined,
+              cleared: gone ? (true as const) : undefined,
               assigned: assigned ? (d.user_ids.length > 1 ? 2 : 1) : 0,
             };
           });
@@ -440,6 +456,8 @@ interface PersonCell {
   start: boolean;
   kind?: 'unavailable' | 'partial';
   note: string;
+  by?: string; // the leader who entered or cleared this on the person's behalf
+  cleared?: true; // a leader cleared a day the person had marked
   assigned: 0 | 1 | 2; // 2 = part of the day
 }
 
@@ -455,7 +473,12 @@ interface PersonRowProps {
 function rowSig(p: PersonRowProps, cells: PersonCell[]): string {
   return (
     `${p.userId}|${p.name}|${p.submitted}|${p.onCall}|${p.me}|${p.clickable}#` +
-    cells.map((c) => `${c.date}${c.kind ?? ''}${c.assigned}${c.start ? 's' : ''}${c.note}${c.label}`).join(';')
+    cells
+      .map(
+        (c) =>
+          `${c.date}${c.kind ?? ''}${c.assigned}${c.start ? 's' : ''}${c.note}${c.by ?? ''}${c.cleared ? 'x' : ''}${c.label}`,
+      )
+      .join(';')
   );
 }
 
@@ -505,8 +528,10 @@ const PersonRow = memo(
           const tipText = [
             `${name} · ${c.label}`,
             c.kind
-              ? `${c.kind === 'unavailable' ? "Can't cover" : 'Partly available'}${c.note ? `: ${c.note}` : ''}`
-              : 'Available',
+              ? `${c.kind === 'unavailable' ? "Can't cover" : 'Partly available'}${c.note ? `: ${c.note}` : ''}${c.by ? ` (by ${c.by})` : ''}`
+              : c.cleared
+                ? `Available (cleared by ${c.by ?? 'a leader'})`
+                : 'Available',
             c.assigned === 2 ? 'On call for part of this day' : c.assigned ? 'On call' : null,
           ]
             .filter(Boolean)
@@ -634,6 +659,7 @@ function CellMenu({
     const uid = state.userId;
     const person = rota.people.find((p) => p.id === uid);
     const entry = entryFor(uid);
+    const cleared = matrix?.cleared?.find((c) => c.user_id === uid && c.date === day.date);
     content = (
       <>
         <Menu.Label>
@@ -667,7 +693,56 @@ function CellMenu({
           <Menu.Label c={entry.kind === 'unavailable' ? 'red' : 'orange'}>
             {entry.kind === 'unavailable' ? "Marked as can't cover" : 'Marked as partly available'}
             {entry.note ? `: ${entry.note}` : ''}
+            {entry.set_by ? ` (by ${entry.set_by})` : ''}
           </Menu.Label>
+        )}
+        {cleared && <Menu.Label>Cleared by {cleared.set_by ?? 'a leader'}</Menu.Label>}
+        {actions.setAvailability && person && (
+          <>
+            <Menu.Divider />
+            {entry?.kind !== 'unavailable' && (
+              <Menu.Item
+                color="red"
+                leftSection={<IconBan size={16} />}
+                onClick={run(() => actions.setAvailability!(uid, [day.date], 'unavailable'))}
+              >
+                Mark {person.name} can't cover
+              </Menu.Item>
+            )}
+            {entry?.kind !== 'partial' && (
+              <Menu.Item
+                color="orange"
+                leftSection={<IconClockHour4 size={16} />}
+                onClick={run(() => actions.setAvailability!(uid, [day.date], 'partial'))}
+              >
+                Mark {person.name} partly available
+              </Menu.Item>
+            )}
+            {entry && (
+              <Menu.Item
+                leftSection={<IconEraser size={16} />}
+                onClick={run(() => actions.setAvailability!(uid, [day.date], null))}
+              >
+                Clear {person.name}'s availability
+              </Menu.Item>
+            )}
+            {(entry?.set_by || cleared) && (
+              <Menu.Item
+                leftSection={<IconArrowBackUp size={16} />}
+                onClick={run(() => actions.setAvailability!(uid, [day.date], 'reset'))}
+              >
+                Reset to what {person.name} entered
+              </Menu.Item>
+            )}
+            {actions.editAvailability && (
+              <Menu.Item
+                leftSection={<IconCalendarPlus size={16} />}
+                onClick={run(() => actions.editAvailability!(uid, day.date))}
+              >
+                Several days…
+              </Menu.Item>
+            )}
+          </>
         )}
       </>
     );

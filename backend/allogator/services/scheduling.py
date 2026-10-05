@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import (
+    AVAIL_CLEARED,
     AVAIL_PARTIAL,
     AVAIL_UNAVAILABLE,
     ROTA_PUBLISHED,
@@ -50,22 +51,79 @@ def team_memberships(db: Session, team_id: int) -> list[Membership]:
 
 
 def load_unavailability(
-    db: Session, user_ids: list[int], start: date, end: date
+    db: Session, user_ids: list[int], start: date, end: date, include_cleared: bool = False
 ) -> dict[int, dict[date, Unavailability]]:
-    """Unavailability entries for users within [start, end)."""
+    """Unavailability entries for users within [start, end). ``include_cleared`` also returns
+    the tombstones left when a leader cleared a member's day (only the board needs those)."""
     out: dict[int, dict[date, Unavailability]] = defaultdict(dict)
     if not user_ids:
         return out
-    rows = db.scalars(
-        select(Unavailability).where(
-            Unavailability.user_id.in_(user_ids),
-            Unavailability.day >= start,
-            Unavailability.day < end,
-        )
+    q = select(Unavailability).where(
+        Unavailability.user_id.in_(user_ids),
+        Unavailability.day >= start,
+        Unavailability.day < end,
     )
-    for row in rows:
+    if not include_cleared:
+        q = q.where(Unavailability.kind != AVAIL_CLEARED)
+    for row in db.scalars(q):
         out[row.user_id][row.day] = row
     return out
+
+
+RESET = "reset"  # kind for a leader putting back what the member entered
+
+
+def save_unavailability(
+    db: Session,
+    user: User,
+    dates: list[date],
+    kind: str | None,
+    note: str,
+    set_by: User | None = None,
+) -> list[Unavailability]:
+    """Mark (or clear, with kind=None) dates for ``user``; the caller commits.
+
+    A leader acting for them passes ``set_by``. Their change is layered over the member's own
+    entry, kept in orig_kind/orig_note: clearing a day the member marked leaves an AVAIL_CLEARED
+    tombstone, and kind=RESET puts the member's entry back. A member's own edit takes over."""
+    dates = sorted(set(dates))
+    rows = {
+        u.day: u
+        for u in db.scalars(
+            select(Unavailability).where(
+                Unavailability.user_id == user.id, Unavailability.day.in_(dates)
+            )
+        )
+    }
+    by = set_by.id if set_by and set_by.id != user.id else None
+    note = note.strip()
+    for d in dates:
+        row = rows.get(d)
+        # What the member themselves had entered for this day (kind None = nothing).
+        if row is None:
+            orig = (None, "")
+        elif row.set_by_id is None:
+            orig = (row.kind, row.note)
+        else:
+            orig = (row.orig_kind, row.orig_note)
+        if kind == RESET:
+            k, n, who = *orig, None
+        elif kind is None:
+            k, n, who = (AVAIL_CLEARED if by and orig[0] else None), "", by
+        else:
+            k, n, who = kind, note, by
+        if k is None:
+            if row:
+                db.delete(row)
+                del rows[d]
+            continue
+        if row is None:
+            row = rows[d] = Unavailability(user_id=user.id, day=d)
+            db.add(row)
+        row.kind, row.note, row.set_by_id, row.updated_at = k, n, who, utcnow()
+        row.orig_kind, row.orig_note = orig if who else (None, "")
+    db.flush()
+    return sorted((r for r in rows.values() if r.kind != AVAIL_CLEARED), key=lambda r: r.day)
 
 
 def write_segments(db: Session, rota: Rota, segments: list[seg.Segment]) -> None:

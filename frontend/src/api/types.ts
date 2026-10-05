@@ -144,11 +144,23 @@ export interface RotaDetail extends Rota {
 
 export type AvailabilityKind = 'unavailable' | 'partial';
 
+/** What a leader can do to someone's day: mark it, clear it, or put back what they entered. */
+export type AvailabilityChange = AvailabilityKind | 'reset' | null;
+
 export interface AvailabilityEntry {
   user_id: number;
   date: string;
   kind: AvailabilityKind;
   note: string;
+  /** A leader's name, when they entered this on the person's behalf. */
+  set_by?: string | null;
+}
+
+/** A day a leader cleared that the person had marked (so it can be reset). */
+export interface AvailabilityCleared {
+  user_id: number;
+  date: string;
+  set_by: string | null;
 }
 
 export interface AvailabilityMember {
@@ -165,12 +177,15 @@ export interface AvailabilityMatrix {
   end_date: string;
   members: AvailabilityMember[];
   entries: AvailabilityEntry[];
+  cleared: AvailabilityCleared[];
 }
 
 export interface Unavailability {
   date: string;
   kind: AvailabilityKind;
   note: string;
+  /** A leader's name, when they entered this on the person's behalf. */
+  added_by?: string | null;
 }
 
 export interface Candidate {

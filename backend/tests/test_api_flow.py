@@ -474,3 +474,85 @@ def test_header_auth_mode(settings_env, monkeypatch):
     with TestClient(create_app()) as client:
         r = client.get("/api/me", headers={"X-Forwarded-Email": "boss@example.com"})
         assert r.status_code == 403  # testclient isn't in 10/8
+
+
+def test_leader_sets_availability_for_member(api):
+    team = make_team(api)
+    url = f"/api/teams/{team['id']}/members/{uid(team, 'amy@example.com')}/unavailability"
+    day = next_monday().isoformat()
+    body = {"dates": [day], "kind": "unavailable", "note": "Long leave"}
+    amy = api.as_("amy@example.com")
+
+    # Only the team's leaders: not another member, not an outsider; the target must be a member.
+    api.as_("ben@example.com").post(url, json=body, expect=403)
+    api.as_("nobody@example.com").post(url, json=body, expect=403)
+    api.post(f"/api/teams/{team['id']}/members/999999/unavailability", json=body, expect=404)
+
+    OUTBOX.clear()
+    out = api.post(url, json=body).json()
+    assert out == [{"date": day, "kind": "unavailable", "note": "Long leave", "added_by": "leader"}]
+    assert amy.get("/api/me/unavailability").json() == out
+    assert amy.get("/api/notifications").json()[0]["kind"] == "availability_set"
+    assert [m.to for m in OUTBOX] == ["amy@example.com"]
+    audit = api.get(f"/api/teams/{team['id']}/audit").json()
+    assert audit[0]["action"] == "availability.set_by_leader"
+
+    # The board's availability matrix (and so the solver) sees it.
+    rota = api.post(
+        f"/api/teams/{team['id']}/rotas", json={"start_date": day, "num_periods": 1}, expect=201
+    ).json()
+    entries = api.get(f"/api/rotas/{rota['id']}/availability").json()["entries"]
+    assert [(e["user_id"], e["date"]) for e in entries] == [(uid(team, "amy@example.com"), day)]
+
+    # Amy editing it herself takes over; a leader can then clear it.
+    amy.post("/api/me/unavailability", json={**body, "kind": "partial"})
+    assert amy.get("/api/me/unavailability").json()[0]["added_by"] is None
+    api.post(url, json={"dates": [day], "kind": None})
+    assert amy.get("/api/me/unavailability").json() == []
+
+
+def test_leader_changes_can_be_reset_to_the_members_own(api, db):
+    from allogator.services.scheduling import load_unavailability
+
+    team = make_team(api)
+    amy_id = uid(team, "amy@example.com")
+    url = f"/api/teams/{team['id']}/members/{amy_id}/unavailability"
+    start = next_monday()
+    d1, d2, d3, d4 = [(start + timedelta(days=i)).isoformat() for i in range(4)]
+    amy = api.as_("amy@example.com")
+    amy.post(
+        "/api/me/unavailability", json={"dates": [d1], "kind": "unavailable", "note": "Wedding"}
+    )
+    amy.post("/api/me/unavailability", json={"dates": [d2], "kind": "partial", "note": "busy"})
+    rota = api.post(
+        f"/api/teams/{team['id']}/rotas", json={"start_date": d1, "num_periods": 1}, expect=201
+    ).json()
+
+    def leader(kind, *dates, note=""):
+        return api.post(url, json={"dates": list(dates), "kind": kind, "note": note}).json()
+
+    def mine():
+        return {
+            e["date"]: (e["kind"], e["note"], e["added_by"])
+            for e in amy.get("/api/me/unavailability").json()
+        }
+
+    leader("partial", d1, note="leader says half")  # overrides the member's entry
+    leader("unavailable", d3)  # adds to an empty day
+    leader(None, d2)  # clears a day the member marked
+    leader("unavailable", d4)  # added, then cleared again: nothing to restore
+    leader(None, d4)
+    assert mine() == {
+        d1: ("partial", "leader says half", "leader"),
+        d3: ("unavailable", "", "leader"),
+    }
+    matrix = api.get(f"/api/rotas/{rota['id']}/availability").json()
+    assert {e["date"]: e["set_by"] for e in matrix["entries"]} == {d1: "leader", d3: "leader"}
+    assert [(c["date"], c["set_by"]) for c in matrix["cleared"]] == [(d2, "leader")]
+    # The solver, analysis etc. never see the tombstone.
+    unav = load_unavailability(db, [amy_id], start, start + timedelta(days=7))
+    assert {d.isoformat() for d in unav[amy_id]} == {d1, d3}
+
+    leader("reset", d1, d2, d3, d4)
+    assert mine() == {d1: ("unavailable", "Wedding", None), d2: ("partial", "busy", None)}
+    assert api.get(f"/api/rotas/{rota['id']}/availability").json()["cleared"] == []
