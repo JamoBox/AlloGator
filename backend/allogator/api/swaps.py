@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select
@@ -34,6 +34,20 @@ router = APIRouter(prefix="/api", tags=["swaps"])
 
 Slot = tuple[Rota, datetime, datetime]
 MAX_SLOTS = 120
+
+
+def _now() -> datetime:
+    """Now (naive UTC) rounded up to the minute: nothing before it can be swapped."""
+    now = utcnow()
+    floor = now.replace(second=0, microsecond=0)
+    return floor if floor == now else floor + timedelta(minutes=1)
+
+
+def _from_now(slots: list[Slot]) -> list[Slot]:
+    """Drop the part of each slot that has already happened, so a swap never rewrites on-call
+    history. A slot wholly in the past is left alone for ``_check_slot`` to refuse."""
+    now = _now()
+    return [(r, max(start, now) if end > now else start, end) for r, start, end in slots]
 
 
 def _fmt(rota: Rota, start: datetime, end: datetime) -> str:
@@ -76,7 +90,7 @@ def _parse_slots(db: Session, body: SwapCreate | OfferCreate) -> list[Slot]:
             merged.append((rota, start, end))
     if len(merged) > MAX_SLOTS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "That's too many separate slots")
-    return merged
+    return _from_now(merged)
 
 
 def _check_slot(rota: Rota, user_id: int, start: datetime, end: datetime, whose: str) -> None:
@@ -87,7 +101,7 @@ def _check_slot(rota: Rota, user_id: int, start: datetime, end: datetime, whose:
     grid = RotaGrid.for_rota(rota)
     if start < grid.start or end > grid.end:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "That time is outside the rota")
-    if end <= utcnow():
+    if end <= _now():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "That slot is already in the past")
     holders = seg.holders(rota_segments(rota), start, end)
     if holders != {user_id}:
@@ -262,8 +276,9 @@ def accept_offer(
     if offer.status != OFFER_PENDING:
         raise HTTPException(status.HTTP_409_CONFLICT, "That offer is no longer pending")
 
-    # Re-validate against the current schedule: things may have changed since.
-    requested, offered = slots_of(swap), slots_of(offer)
+    # Re-validate against the current schedule: things may have changed since, and any part of
+    # a slot that has gone by since it was requested is left as it was.
+    requested, offered = _from_now(slots_of(swap)), _from_now(slots_of(offer))
     for r, start, end in requested:
         _check_slot(r, swap.requester_id, start, end, f"{swap.requester.name} is no longer")
     for r, start, end in offered:

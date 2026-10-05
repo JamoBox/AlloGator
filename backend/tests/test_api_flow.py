@@ -1,7 +1,8 @@
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from icalendar import Calendar
 
+from allogator.api import swaps
 from allogator.services.email import OUTBOX
 
 LEADER = "leader@example.com"
@@ -321,6 +322,41 @@ def test_swap_cover_only_and_cancel(api):
     api.as_(helper).post(f"/api/swaps/{swap['id']}/offers", json={}, expect=409)
     swap = req.post(f"/api/swaps/{swap['id']}/cancel").json()
     assert swap["status"] == "cancelled" and swap["offers"][0]["status"] == "declined"
+
+
+def test_swaps_never_rewrite_time_that_has_already_gone(api, monkeypatch):
+    team = make_team(api)
+    today = date.today()
+    rota = _published_rota(api, team, weeks=3, start=today - timedelta(days=3))
+    owner = rota["periods"][0]["owner_id"]
+    email = {m["user"]["id"]: m["user"]["email"] for m in team["members"]}
+    req = api.as_(email[owner])
+    helper = next(e for i, e in email.items() if i != owner)
+    days = [d for d in rota["days"] if d["period_index"] == 0]
+    whole = {"rota_id": rota["id"], "start_at": days[0]["start_at"], "end_at": days[-1]["end_at"]}
+
+    # A slot that is wholly in the past is refused; a part-elapsed one starts no earlier than now.
+    req.post("/api/swaps", json={**whole, "end_at": days[0]["end_at"]}, expect=400)
+    before = datetime.now(UTC)
+    swap = req.post("/api/swaps", json=whole, expect=201).json()
+    assert datetime.fromisoformat(swap["slots"][0]["start_at"]) >= before
+    swap = api.as_(helper).post(f"/api/swaps/{swap['id']}/offers", json={}, expect=201).json()
+
+    # By the time it's accepted two more days have gone: those stay with the requester too.
+    real_utcnow = swaps.utcnow
+    monkeypatch.setattr(swaps, "utcnow", lambda: real_utcnow() + timedelta(days=2))
+    req.post(f"/api/swaps/{swap['id']}/offers/{swap['offers'][0]['id']}/accept")
+
+    rota = api.get(f"/api/rotas/{rota['id']}").json()
+    by_date = {d["date"]: d["user_ids"] for d in rota["days"]}
+    helper_id = next(i for i, e in email.items() if e == helper)
+    for d in days:
+        # Days in between may or may not have ended, depending on the time of day.
+        when = date.fromisoformat(d["date"])
+        if when <= today:
+            assert by_date[d["date"]] == [owner], d["date"]
+        elif when >= today + timedelta(days=3):
+            assert by_date[d["date"]] == [helper_id], d["date"]
 
 
 def test_swap_separate_days_and_withdraw(api):
