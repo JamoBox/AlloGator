@@ -51,7 +51,7 @@ export function IssuesPanel({
       <CrocEmpty
         sleepy
         title="Nothing to chew on"
-        description="Everyone is covered, nobody is scheduled when they said they can't be, and there's no partial cover."
+        description="Everyone is covered and nobody is scheduled when they said they can't be."
       />
     );
   }
@@ -76,8 +76,8 @@ export function IssuesPanel({
             )}
             {issue.type === 'partial_cover' && issue.covers && !issue.decided && (
               <Text size="xs" c="dimmed">
-                Partial cover is normally avoided; it was used because nobody else could cover the
-                whole period.
+                The solver avoids splitting a period where it can, so this is usually the best fit
+                available. Nothing to decide unless you'd rather give the whole period to one person.
               </Text>
             )}
             {editable &&
