@@ -190,4 +190,4 @@ def dev_outbox():
 def dev_seed(db: Session = Depends(get_db)):
     from ..demo import seed_demo
 
-    return seed_demo(db)
+    return seed_demo(db, admin=True)

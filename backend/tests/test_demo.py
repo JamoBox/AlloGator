@@ -3,11 +3,29 @@ from datetime import date
 import pytest
 from sqlalchemy import select
 
+from allogator import db as db_module
+from allogator.cli import main
+from allogator.config import get_settings
 from allogator.demo import seed_demo
-from allogator.models import ROTA_PUBLISHED, Rota
+from allogator.models import ROTA_PUBLISHED, Rota, User
 from allogator.services.analysis import analyze
 from allogator.services.hints import candidate_hints
 from allogator.services.scheduling import generate
+
+
+def test_cli_seed_demo_refuses_outside_dev_mode(settings_env, monkeypatch, capsys):
+    monkeypatch.setenv("ALLOGATOR_AUTH_MODE", "header")
+    get_settings.cache_clear()
+    assert main(["seed-demo"]) == 1
+    assert "--force" in capsys.readouterr().err
+    # Forced, it seeds without making anyone a global admin.
+    assert main(["seed-demo", "--force"]) == 0
+    assert "non-dev" in capsys.readouterr().err
+    db = db_module.session_factory()()
+    try:
+        assert not db.scalar(select(User).where(User.email == "leader@example.com")).is_admin
+    finally:
+        db.close()
 
 
 @pytest.mark.parametrize(
