@@ -20,6 +20,7 @@ from ..models import (
     SwapRequest,
     SwapSlot,
     Team,
+    Unavailability,
     User,
     utcnow,
 )
@@ -37,6 +38,7 @@ from ..schemas import (
     SwapRequestOut,
     TeamDetail,
     TeamOut,
+    UnavailabilityOut,
     UserOut,
 )
 from ..services import segments as seg
@@ -53,6 +55,12 @@ def user_out(u: User | None) -> UserOut | None:
         return None
     return UserOut(
         id=u.id, email=u.email, display_name=u.display_name, name=u.name, is_admin=u.is_admin
+    )
+
+
+def unavailability_out(u: Unavailability) -> UnavailabilityOut:
+    return UnavailabilityOut(
+        date=u.day, kind=u.kind, note=u.note, added_by=u.set_by.name if u.set_by else None
     )
 
 

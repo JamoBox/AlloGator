@@ -51,6 +51,9 @@ ROTA_STATUSES = (ROTA_PLANNING, ROTA_COLLECTING, ROTA_REVIEW, ROTA_PUBLISHED)
 AVAIL_UNAVAILABLE = "unavailable"  # cannot cover (hard constraint)
 AVAIL_PARTIAL = "partial"  # partially available; see note (soft constraint)
 AVAIL_KINDS = (AVAIL_UNAVAILABLE, AVAIL_PARTIAL)
+# Not a real kind: a tombstone left when a leader clears a day the member marked, so the
+# member's entry can be restored. Hidden by load_unavailability and /api/me/unavailability.
+AVAIL_CLEARED = "cleared"
 
 # Swap lifecycle
 SWAP_OPEN = "open"
@@ -229,6 +232,15 @@ class Unavailability(Base):
     kind: Mapped[str] = mapped_column(String(16), default=AVAIL_UNAVAILABLE)
     note: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    # The leader who entered this on the user's behalf; NULL when the user set it themselves.
+    set_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # What the user themselves had entered before a leader changed it (orig_kind NULL = nothing).
+    orig_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    orig_note: Mapped[str] = mapped_column(Text, default="")
+
+    set_by: Mapped[User | None] = relationship(foreign_keys=[set_by_id])
 
 
 class AvailabilitySubmission(Base):

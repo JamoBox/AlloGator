@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query, Response
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
 from ..config import get_settings
 from ..db import get_db
 from ..models import (
+    AVAIL_CLEARED,
     OFFER_PENDING,
     ROTA_COLLECTING,
     ROTA_PUBLISHED,
@@ -35,8 +36,9 @@ from ..schemas import (
     UnavailabilityOut,
 )
 from ..services.ics import build_calendar
+from ..services.scheduling import save_unavailability
 from ..services.special_days import team_special_days
-from .serialize import rota_out, schedule_shift, swap_out
+from .serialize import rota_out, schedule_shift, swap_out, unavailability_out
 
 router = APIRouter(prefix="/api/me", tags=["me"])
 
@@ -145,15 +147,14 @@ def my_unavailability(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    q = select(Unavailability).where(Unavailability.user_id == user.id)
+    q = select(Unavailability).where(
+        Unavailability.user_id == user.id, Unavailability.kind != AVAIL_CLEARED
+    )
     if start:
         q = q.where(Unavailability.day >= start)
     if end:
         q = q.where(Unavailability.day <= end)
-    return [
-        UnavailabilityOut(date=u.day, kind=u.kind, note=u.note)
-        for u in db.scalars(q.order_by(Unavailability.day))
-    ]
+    return [unavailability_out(u) for u in db.scalars(q.order_by(Unavailability.day))]
 
 
 @router.post("/unavailability", response_model=list[UnavailabilityOut])
@@ -163,41 +164,9 @@ def set_unavailability(
     user: User = Depends(get_current_user),
 ):
     """Mark (or clear, with kind=null) a set of dates."""
-    dates = sorted(set(body.dates))
-    if body.kind is None:
-        db.execute(
-            delete(Unavailability).where(
-                Unavailability.user_id == user.id, Unavailability.day.in_(dates)
-            )
-        )
-    else:
-        existing = {
-            u.day: u
-            for u in db.scalars(
-                select(Unavailability).where(
-                    Unavailability.user_id == user.id, Unavailability.day.in_(dates)
-                )
-            )
-        }
-        for d in dates:
-            row = existing.get(d)
-            if row is None:
-                db.add(
-                    Unavailability(user_id=user.id, day=d, kind=body.kind, note=body.note.strip())
-                )
-            else:
-                row.kind = body.kind
-                row.note = body.note.strip()
-                row.updated_at = utcnow()
+    rows = save_unavailability(db, user, body.dates, body.kind, body.note)
     db.commit()
-    return [
-        UnavailabilityOut(date=u.day, kind=u.kind, note=u.note)
-        for u in db.scalars(
-            select(Unavailability)
-            .where(Unavailability.user_id == user.id, Unavailability.day.in_(dates))
-            .order_by(Unavailability.day)
-        )
-    ]
+    return [unavailability_out(u) for u in rows]
 
 
 @router.get("/special-days", response_model=list[SpecialDayOut])

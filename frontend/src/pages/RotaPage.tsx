@@ -53,13 +53,22 @@ import {
   useRotaHistory,
   useTeam,
 } from '../api/hooks';
-import type { Analysis, Day, RotaDetail, ScheduleShift, TeamDetail } from '../api/types';
+import type {
+  Analysis,
+  AvailabilityChange,
+  AvailabilityMatrix,
+  Day,
+  RotaDetail,
+  ScheduleShift,
+  TeamDetail,
+} from '../api/types';
 import { CalendarButton, downloadOrToast, PersonChip, RotaStatusBadge, WholeNumberInput } from '../components/common';
 import { IssuesPanel } from '../components/rota/IssuesPanel';
 import { PeriodsList } from '../components/rota/PeriodsList';
 import { type BoardActions, RotaBoard } from '../components/rota/RotaBoard';
 import { StatsTable } from '../components/rota/StatsTable';
 import { DecisionHelper } from '../components/rota/DecisionHelper';
+import { MemberAvailabilityForm } from '../components/rota/MemberAvailabilityForm';
 import { ChompLoader, IconChomp } from '../components/brand';
 import { RequestSwapModal } from '../components/team/SwapsTab';
 import { dayjs, fmtDateLong, fmtDateRange, fromNow, inTz, ISO, toLocalInput } from '../lib/dates';
@@ -388,10 +397,51 @@ function BoardWithActions({
       setData: (result) => [[key, result]],
     },
   );
+  // A leader marking, clearing or resetting someone's availability for them. Marks and clears
+  // show on the board at once; a reset waits for the server, which knows what they entered.
+  const matrixKey = keys.availability(rota.id);
+  const myName = useMe().data?.name ?? 'you';
+  const setAvail = useAction(
+    (a: { userId: number; dates: string[]; change: AvailabilityChange; note?: string }) =>
+      api(`/api/teams/${rota.team_id}/members/${a.userId}/unavailability`, {
+        body: { dates: a.dates, kind: a.change, note: a.note ?? '' },
+      }),
+    {
+      optimistic: (a, qc) => {
+        const prev = qc.getQueryData<AvailabilityMatrix>(matrixKey);
+        if (prev && a.change !== 'reset') {
+          const kind = a.change;
+          const hit = (e: { user_id: number; date: string }) =>
+            e.user_id === a.userId && a.dates.includes(e.date);
+          qc.setQueryData<AvailabilityMatrix>(matrixKey, {
+            ...prev,
+            entries: [
+              ...prev.entries.filter((e) => !hit(e)),
+              ...(kind
+                ? a.dates.map((date) => ({
+                    user_id: a.userId,
+                    date,
+                    kind,
+                    note: a.note ?? '',
+                    set_by: myName,
+                  }))
+                : []),
+            ],
+            cleared: kind ? prev.cleared.filter((c) => !hit(c)) : prev.cleared,
+          });
+        }
+        return () => qc.setQueryData(matrixKey, prev);
+      },
+      invalidate: [matrixKey, keys.analysis(rota.id), ['rotas', rota.id, 'hints']],
+    },
+  );
   const [custom, setCustom] = useState<{ userId: number | null; day: Day } | null>(null);
   const [decide, setDecide] = useState<Day | null>(null);
+  const [availEdit, setAvailEdit] = useState<{ userId: number; date: string } | null>(null);
 
   const actions: BoardActions = {
+    setAvailability: (userId, dates, change) => setAvail.mutate({ userId, dates, change }),
+    editAvailability: (userId, date) => setAvailEdit({ userId, date }),
     assignDay: (userId, date) => assign.mutate({ user_id: userId, from_date: date }),
     assignPeriod: (userId, periodIndex) => assign.mutate({ user_id: userId, period_index: periodIndex }),
     customRange: (userId, day) => setCustom({ userId, day }),
@@ -414,6 +464,25 @@ function BoardWithActions({
             userId={custom.userId}
             day={custom.day}
             onSubmit={(body) => assign.mutateAsync(body as AssignBody).then(() => setCustom(null))}
+          />
+        )}
+      </Modal>
+      <Modal
+        opened={!!availEdit}
+        onClose={() => setAvailEdit(null)}
+        size="lg"
+        title={`Availability for ${rota.people.find((p) => p.id === availEdit?.userId)?.name ?? 'this person'}`}
+      >
+        {availEdit && (
+          <MemberAvailabilityForm
+            rota={rota}
+            matrix={matrix}
+            userId={availEdit.userId}
+            date={availEdit.date}
+            onApply={(dates, change, note) => {
+              setAvailEdit(null);
+              setAvail.mutate({ userId: availEdit.userId, dates, change, note });
+            }}
           />
         )}
       </Modal>

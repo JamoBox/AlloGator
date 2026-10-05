@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_user, get_rota, get_team, is_leader, require_leader, require_member
 from ..db import get_db
 from ..models import (
+    AVAIL_CLEARED,
     ROTA_COLLECTING,
     ROTA_PLANNING,
     ROTA_PUBLISHED,
@@ -24,6 +25,7 @@ from ..models import (
 from ..schemas import (
     AssignRequest,
     AuditOut,
+    AvailabilityCleared,
     AvailabilityEntry,
     AvailabilityMatrix,
     AvailabilityMember,
@@ -276,7 +278,10 @@ def availability_matrix(
     require_member(db, rota.team_id, user)
     memberships = team_memberships(db, rota.team_id)
     subs = {s.user_id: s for s in rota.submissions}
-    unav = load_unavailability(db, [m.user_id for m in memberships], rota.start_date, rota.end_date)
+    unav = load_unavailability(
+        db, [m.user_id for m in memberships], rota.start_date, rota.end_date, include_cleared=True
+    )
+    rows = [(uid, d, e) for uid, days in unav.items() for d, e in sorted(days.items())]
     tz = get_zone(rota.timezone)
     return AvailabilityMatrix(
         rota_id=rota.id,
@@ -295,9 +300,20 @@ def availability_matrix(
             for m in memberships
         ],
         entries=[
-            AvailabilityEntry(user_id=uid, date=d, kind=e.kind, note=e.note)
-            for uid, days in unav.items()
-            for d, e in sorted(days.items())
+            AvailabilityEntry(
+                user_id=uid,
+                date=d,
+                kind=e.kind,
+                note=e.note,
+                set_by=e.set_by.name if e.set_by else None,
+            )
+            for uid, d, e in rows
+            if e.kind != AVAIL_CLEARED
+        ],
+        cleared=[
+            AvailabilityCleared(user_id=uid, date=d, set_by=e.set_by.name if e.set_by else None)
+            for uid, d, e in rows
+            if e.kind == AVAIL_CLEARED
         ],
     )
 
