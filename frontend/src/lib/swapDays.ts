@@ -24,7 +24,8 @@ function handoverTime(shifts: ScheduleShift[], tz: string): string {
 /**
  * Split shifts into on-call days, keyed by local date. A day runs handover to handover (keeping
  * the wall-clock handover time across DST changes); a shift that starts or ends mid-day only
- * contributes the part it covers. Days already over are left out.
+ * contributes the part it covers. Days already over are left out, and a day in progress starts
+ * from ``now``.
  */
 export function shiftDays(shifts: ScheduleShift[], tz: string, now = dayjs()): Map<string, DaySlot[]> {
   const out = new Map<string, DaySlot[]>();
@@ -40,7 +41,7 @@ export function shiftDays(shifts: ScheduleShift[], tz: string, now = dayjs()): M
       const next = dayjs(date).add(1, 'day').format(ISO);
       const from = boundary(date);
       const to = boundary(next);
-      const a = start.isAfter(from) ? start : from;
+      const a = [start, from, now].reduce((x, y) => (y.isAfter(x) ? y : x)); // time gone can't be swapped
       const b = end.isBefore(to) ? end : to;
       if (a.isBefore(b) && b.isAfter(now)) {
         const list = out.get(date) ?? [];

@@ -47,10 +47,12 @@ describe('shiftDays', () => {
     expect(days.has('2026-10-29')).toBe(false);
   });
 
-  it('drops days that are over', () => {
+  it('drops days that are over and starts the one in progress from now', () => {
     const now = dayjs('2026-10-06T12:00:00+01:00');
     const days = shiftDays([shift(1, '2026-10-05T09:00:00+01:00', '2026-10-08T09:00:00+01:00')], TZ, now);
     expect([...days.keys()]).toEqual(['2026-10-06', '2026-10-07']);
+    expect(days.get('2026-10-06')?.[0].start_at).toBe('2026-10-06T12:00:00+01:00');
+    expect(days.get('2026-10-07')?.[0].start_at).toBe('2026-10-07T09:00:00+01:00');
   });
 });
 
