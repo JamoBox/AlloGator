@@ -54,6 +54,9 @@
   position: relative;
   aspect-ratio: 1 / 0.9;
   min-height: 38px;
+  /* An aspect-ratio grid item doesn't stretch to its track: its width would come from min-height
+     and overflow the track, overlapping neighbours in a narrow month. */
+  width: 100%;
   border-radius: var(--mantine-radius-sm);
   border: 1px solid var(--ag-grid-line);
   background: var(--mantine-color-body);
