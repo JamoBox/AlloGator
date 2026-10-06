@@ -196,7 +196,7 @@ export function AvailabilityCalendar({
       </Text>
 
       <SimpleGrid
-        cols={{ base: 1, sm: Math.min(2, months), lg: months }}
+        cols={{ base: 1, sm: Math.min(2, months), xl: months }}
         spacing="lg"
         className="ag-month"
         onPointerMove={onPointerMove}
