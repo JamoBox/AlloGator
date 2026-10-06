@@ -72,7 +72,8 @@ def _same_day_last_year(team: Team, day: date, name: str) -> date:
         return day - timedelta(days=365)
 
 
-def seed_demo(db: Session, today: date | None = None) -> dict[str, Any]:
+def seed_demo(db: Session, today: date | None = None, *, admin: bool = False) -> dict[str, Any]:
+    """Create the demo team. ``admin`` also makes the demo leader a global admin: dev mode only."""
     if db.scalar(select(Team).where(Team.name == DEMO_TEAM)):
         return {"status": "exists"}
     today = today or date.today()
@@ -85,7 +86,7 @@ def seed_demo(db: Session, today: date | None = None) -> dict[str, Any]:
             u = User(email=email, display_name=name)
             db.add(u)
         users[email] = u
-    users["leader@example.com"].is_admin = True
+    users["leader@example.com"].is_admin = admin
     db.flush()
 
     team = Team(

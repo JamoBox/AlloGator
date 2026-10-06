@@ -178,7 +178,8 @@ All settings are environment variables (or a `.env` file in the working director
 | `ALLOGATOR_SOLVER_WORKERS` | CPU count (max 8) | Parallel search workers |
 | `ALLOGATOR_AUTO_MIGRATE` | `true` | Apply database migrations at startup (or run `allogator migrate`) |
 
-Other commands: `allogator migrate`, `allogator seed-demo`, `allogator make-admin EMAIL`.
+Other commands: `allogator migrate`, `allogator seed-demo` (dev auth mode only, or `--force`),
+`allogator make-admin EMAIL`.
 
 ## Import and export
 

@@ -14,10 +14,27 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true")
     sub.add_parser("migrate", help="Apply database migrations")
-    sub.add_parser("seed-demo", help="Create a demo team with sample data")
+    seed = sub.add_parser("seed-demo", help="Create a demo team with sample data (dev mode)")
+    seed.add_argument("--force", action="store_true", help="Seed even outside dev auth mode")
     admin = sub.add_parser("make-admin", help="Grant global admin to a user (by email)")
     admin.add_argument("email")
     args = parser.parse_args(argv)
+
+    dev = False
+    if args.cmd == "seed-demo":
+        from .config import get_settings
+
+        dev = get_settings().auth_mode == "dev"
+        if not dev and not args.force:
+            print(
+                "Refusing to seed demo data: ALLOGATOR_AUTH_MODE is not 'dev', so this may be a "
+                "real database. Pass --force to seed it anyway (the demo leader is not made an "
+                "admin).",
+                file=sys.stderr,
+            )
+            return 1
+        if not dev:
+            print("Warning: seeding demo data into a non-dev database.", file=sys.stderr)
 
     if args.cmd == "serve":
         import uvicorn
@@ -44,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "seed-demo":
             from .demo import seed_demo
 
-            print(seed_demo(db))
+            print(seed_demo(db, admin=dev))
         elif args.cmd == "make-admin":
             from .auth import get_or_create_user
 
