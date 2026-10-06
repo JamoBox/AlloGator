@@ -21,6 +21,8 @@ export interface Me extends User {
   calendar_feed_url: string;
   memberships: MembershipBrief[];
   can_create_teams: boolean;
+  /** Onboarding walkthroughs finished or skipped (see lib/tours.ts). */
+  tours_done: string[];
 }
 
 export interface AppConfig {

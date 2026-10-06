@@ -59,6 +59,7 @@ class MeOut(UserOut):
     calendar_feed_url: str
     memberships: list[MembershipBrief]
     can_create_teams: bool
+    tours_done: list[str]
 
 
 class MeUpdate(BaseModel):

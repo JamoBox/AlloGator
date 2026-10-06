@@ -80,7 +80,7 @@ export function Dashboard() {
           <NextShiftCard current={current} next={next} loading={shifts.isLoading} />
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 7 }}>
-          <Card h="100%">
+          <Card h="100%" data-tour="dash-attention">
             <SectionTitle>Needs your attention</SectionTitle>
             {todo.isLoading && <Loader size="sm" />}
             {t && attention === 0 && (
