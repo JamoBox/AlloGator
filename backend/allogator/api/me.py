@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import select
@@ -65,6 +66,7 @@ def me_out(db: Session, user: User) -> MeOut:
             for m, t in rows
         ],
         can_create_teams=s.open_team_creation or user.is_admin,
+        tours_done=user.tours_done or [],
     )
 
 
@@ -82,6 +84,19 @@ def update_me(
     if body.email_notifications is not None:
         user.email_notifications = body.email_notifications
     db.commit()
+    return me_out(db, user)
+
+
+@router.post("/tours/{tour}", response_model=MeOut)
+def finish_tour(
+    tour: Literal["user", "leader"],
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Record that a walkthrough was finished or skipped, so it stops auto-starting."""
+    if tour not in (user.tours_done or []):
+        user.tours_done = [*(user.tours_done or []), tour]  # reassign: JSON isn't mutation-tracked
+        db.commit()
     return me_out(db, user)
 
 

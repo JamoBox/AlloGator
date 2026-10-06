@@ -111,7 +111,7 @@ export function AvailabilityPage() {
 
       <Grid gap="lg">
         <Grid.Col span={{ base: 12, lg: 9 }}>
-          <Card padding="md">
+          <Card padding="md" data-tour="avail-calendar">
             <AvailabilityCalendar
               entries={entries.data ?? []}
               highlights={highlights}

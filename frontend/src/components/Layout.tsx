@@ -21,15 +21,18 @@ import {
   IconLayoutSidebarLeftExpand,
   IconLogout,
   IconMoon,
+  IconRoute,
   IconSettings,
   IconShieldLock,
   IconSun,
   IconUsersGroup,
 } from '@tabler/icons-react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useConfig, useMe, usePrefetch } from '../api/hooks';
 import { initials, personColor } from '../lib/people';
+import { isLeader } from '../lib/tours';
+import { useTours } from '../lib/useTours';
 import { CrocLogo } from './brand';
 import { DevUserSwitcher } from './DevUserSwitcher';
 import { NotificationsMenu } from './NotificationsMenu';
@@ -43,6 +46,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
   const prefetch = usePrefetch();
+  // A walkthrough step pointing into the sidebar shows it even when it's collapsed.
+  const [navForced, setNavForced] = useState(false);
+  const tours = useTours(setNavForced);
 
   const isActive = (path: string) =>
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
@@ -50,7 +56,7 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <AppShell
       header={{ height: 56 }}
-      navbar={{ width: 250, breakpoint: 'sm', collapsed: { mobile: !opened, desktop: navHidden } }}
+      navbar={{ width: 250, breakpoint: 'sm', collapsed: { mobile: !opened && !navForced, desktop: navHidden && !navForced } }}
       padding="md"
     >
       <AppShell.Header>
@@ -95,7 +101,7 @@ export function Layout({ children }: { children: ReactNode }) {
             {me.data && (
               <Menu position="bottom-end" withArrow>
                 <Menu.Target>
-                  <UnstyledButton aria-label="Account menu">
+                  <UnstyledButton aria-label="Account menu" data-tour="account-menu">
                     <Avatar color={personColor(me.data.id)} radius="xl" size={32}>
                       {initials(me.data.name)}
                     </Avatar>
@@ -110,6 +116,14 @@ export function Layout({ children }: { children: ReactNode }) {
                   <Menu.Item component={Link} to="/profile" leftSection={<IconSettings size={16} />}>
                     Profile & calendar
                   </Menu.Item>
+                  <Menu.Item leftSection={<IconRoute size={16} />} onClick={() => void tours.start('user')}>
+                    Replay walkthrough
+                  </Menu.Item>
+                  {isLeader(me.data) && (
+                    <Menu.Item leftSection={<IconRoute size={16} />} onClick={() => void tours.start('leader')}>
+                      Replay leader walkthrough
+                    </Menu.Item>
+                  )}
                   {config.data?.logout_url && (
                     <Menu.Item
                       component="a"
@@ -140,6 +154,7 @@ export function Layout({ children }: { children: ReactNode }) {
             component={Link}
             to="/availability"
             label="My availability"
+            data-tour="nav-availability"
             leftSection={<IconCalendarOff size={18} />}
             active={isActive('/availability')}
             onClick={close}
@@ -148,6 +163,7 @@ export function Layout({ children }: { children: ReactNode }) {
             component={Link}
             to="/teams"
             label="Teams"
+            data-tour="nav-teams"
             leftSection={<IconUsersGroup size={18} />}
             active={location.pathname === '/teams'}
             onClick={close}

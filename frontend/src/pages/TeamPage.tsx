@@ -53,6 +53,7 @@ export function TeamPage() {
           </Tabs.Tab>
           <Tabs.Tab
             value="swaps"
+            data-tour="team-tab-swaps"
             leftSection={<IconArrowsExchange size={16} />}
             rightSection={
               openSwaps ? (
@@ -64,7 +65,7 @@ export function TeamPage() {
           >
             Swaps
           </Tabs.Tab>
-          <Tabs.Tab value="members" leftSection={<IconUsers size={16} />}>
+          <Tabs.Tab value="members" data-tour="team-tab-members" leftSection={<IconUsers size={16} />}>
             Members
           </Tabs.Tab>
           <Tabs.Tab value="data" leftSection={<IconDatabaseExport size={16} />}>

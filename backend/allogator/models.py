@@ -78,6 +78,8 @@ class User(Base):
     calendar_token: Mapped[str] = mapped_column(String(64), unique=True, default=new_calendar_token)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Onboarding walkthroughs the user has finished or skipped (see api/me.py TOURS).
+    tours_done: Mapped[list[str]] = mapped_column(JSON, default=list)
 
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

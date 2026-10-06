@@ -38,7 +38,7 @@ export function RotasTab({ team }: { team: TeamDetail }) {
           schedule, review it and publish.
         </Text>
         {team.is_leader && (
-          <Button leftSection={<IconPlus size={16} />} onClick={modal.open}>
+          <Button leftSection={<IconPlus size={16} />} onClick={modal.open} data-tour="rotas-new">
             Plan a new rota
           </Button>
         )}

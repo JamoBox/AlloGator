@@ -63,6 +63,7 @@ export function NotificationsMenu() {
             color="gray"
             onClick={() => setOpened((o) => !o)}
             aria-label="Notifications"
+            data-tour="notifications"
           >
             <IconBell size={20} />
           </ActionIcon>

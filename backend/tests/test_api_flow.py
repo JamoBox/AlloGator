@@ -563,3 +563,11 @@ def test_leader_changes_can_be_reset_to_the_members_own(api, db):
     leader("reset", d1, d2, d3, d4)
     assert mine() == {d1: ("unavailable", "Wedding", None), d2: ("partial", "busy", None)}
     assert api.get(f"/api/rotas/{rota['id']}/availability").json()["cleared"] == []
+
+
+def test_tours_done_is_recorded_once_per_tour(api):
+    assert api.get("/api/me").json()["tours_done"] == []
+    api.post("/api/me/tours/user")
+    api.post("/api/me/tours/user")  # idempotent
+    assert api.post("/api/me/tours/leader").json()["tours_done"] == ["user", "leader"]
+    api.post("/api/me/tours/nope", expect=422)

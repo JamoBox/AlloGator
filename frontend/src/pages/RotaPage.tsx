@@ -163,7 +163,7 @@ export function RotaPage() {
         <Tabs.Panel value="board" pt="md">
           <Stack>
             {leader && analysis.data && <IssueSummary analysis={analysis.data} onOpen={() => setTab('issues')} />}
-            <Card padding="sm">
+            <Card padding="sm" data-tour="rota-board">
               <BoardWithActions rota={r} matrix={matrix.data} editable={editable} meId={me.data?.id} />
             </Card>
             {editable && (
@@ -184,7 +184,7 @@ export function RotaPage() {
           />
         </Tabs.Panel>
         <Tabs.Panel value="availability" pt="md">
-          <Card padding="sm">
+          <Card padding="sm" data-tour="rota-board">
             <Text size="sm" c="dimmed" mb="xs">
               Everyone's submitted availability for this rota. Hover a cell to see notes.{' '}
               <Anchor component={Link} to={`/availability?rota=${r.id}`} size="sm">
@@ -734,7 +734,7 @@ function LeaderActions({
   })();
 
   return (
-    <Group gap="xs">
+    <Group gap="xs" data-tour="rota-actions">
       {primary}
       <Menu position="bottom-end" withArrow>
         <Menu.Target>
